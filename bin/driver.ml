@@ -163,6 +163,17 @@ module Phases = struct
     (* Return the 'initial' compiler context. *)
     Context.({ context' with variable_environment = venv })
 
+  let clientBackend =
+    let clientBackendOptions = ["js"; "wasm"] in
+    let open Utility in
+    Settings.(option ~default:(Some "wasm") "client_backend"
+      |> synopsis (Printf.sprintf "Choose backend for client (values: %s)" (String.concat ", " clientBackendOptions)) (*should be default js in release*)
+      |> CLI.(add (long "client-backend"))
+      |> to_string from_string_option
+      |> convert (Sys.expand ->- some)
+      |> privilege `System
+      |> sync)
+
   let whole_program : Context.t -> string -> (Context.t * Types.datatype * Value.t)
     = fun initial_context filename ->
     (* Process source file (and its dependencies. *)
@@ -178,6 +189,12 @@ module Phases = struct
     let nenv      = Context.name_environment context in
     let tenv      = Context.typing_environment context in
     let ffi_files = Context.ffi_files context in
+    let _ = match Settings.get clientBackend with
+    | Some a ->
+      if a = "js" then ()
+      else if a = "wasm" then Irtowasm.run result
+      else failwith (Printf.sprintf "Unrecognised client backend option %s" a)
+    | _ -> () in
     Webserver.init (valenv, nenv, tenv) globals ffi_files;
     Evaluate.run result
 
