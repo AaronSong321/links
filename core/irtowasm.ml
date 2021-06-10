@@ -357,22 +357,22 @@ module Wasm = struct
       let irLocalName2Wasm: Var.var -> string = fun p -> prependDollar (mangleLocalName p)
       let flattenArgs: prettyPrintElement list list -> prettyPrintElement list = fun args ->
         List.fold_left (fun l r -> 
-          match l with 
-          | [] -> r
-          | _ -> l@r
-        ) [] args
+            match l with 
+            | [] -> r
+            | _ -> l@r
+          ) [] args
       let flattenInscs: prettyPrintElement list list -> prettyPrintElement list = fun args ->
         List.fold_left (fun l r -> 
-          match l with 
-          | [] -> r
-          | _ -> l@r
-        ) [] args
+            match l with 
+            | [] -> r
+            | _ -> l@r
+          ) [] args
       let flattenDefs: prettyPrintElement list -> prettyPrintElement list = fun args ->
         List.fold_left (fun l r ->
-          match l with
-          | [] -> [r]
-          | _ -> l@[r]
-        ) [] args
+            match l with
+            | [] -> [r]
+            | _ -> l@[LineIndent;r]
+          ) [] args
       let inscArgs: printer -> prettyPrintElement list -> prettyPrintElement list list -> prettyPrintElement list = fun printer insc args ->
         let inscArgs_inner: printer -> prettyPrintElement list -> prettyPrintElement list -> prettyPrintElement list = fun printer insc args ->
           match printer.argumentPrint with
@@ -454,25 +454,20 @@ module Wasm = struct
       let irMetaType2Wasm = fun point ->
         let open Types in
         (match Unionfind.find point with
-          | Var _ -> raise (NotImplemented __LOC__)
-          | Closed -> raise (NotImplemented __LOC__)
-          | Recursive _ -> raise (NotImplemented __LOC__)
-          | t -> irType2Wasm t
+         | Var _ -> raise (NotImplemented __LOC__)
+         | Closed -> raise (NotImplemented __LOC__)
+         | Recursive _ -> raise (NotImplemented __LOC__)
+         | t -> irType2Wasm t
         ) in
       let open Types in
       let irRecordType2Wasm row = irType2Wasm row in
       match irType with
       | Primitive p_ -> ValType (irPrimitiveType2Wasm p_)
-      (* | Function functionType -> 
-          let inType,effect,outType = functionType in
-          let inWasmType = irType2Wasm inType in
-          let outWasmType = irType2Wasm outType in
-          foldLeft inWasmType outWasmType *)
       | Function irFuncType ->
-        let (inType, _effect, outType) = irFuncType in
-        let inType' = irType2Wasm inType in
-        let outType' = irType2Wasm outType in
-        foldLeft inType' outType'
+          let (inType, _effect, outType) = irFuncType in
+          let inType' = irType2Wasm inType in
+          let outType' = irType2Wasm outType in
+          foldLeft inType' outType'
       | Effect _ -> raise (NotImplemented __LOC__)
       | Var _ -> raise (NotImplemented __LOC__)
       | Recursive _ -> raise (NotImplemented __LOC__)
@@ -481,7 +476,6 @@ module Wasm = struct
       | Application _ -> raise (NotImplemented __LOC__)
       | RecursiveApplication _ -> raise (NotImplemented __LOC__)
       | Meta point -> irMetaType2Wasm point
-      (* raise (NotImplemented __LOC__) *)
       | Lolli _ -> raise (NotImplemented __LOC__)
       | Record row -> irRecordType2Wasm row
       | Variant _ -> raise (NotImplemented __LOC__)
@@ -503,24 +497,53 @@ module Wasm = struct
 
     let irFunc2Wasm: moduleDef -> Ir.fun_def -> funcDef = fun wasmModule irFunc ->
       let open Var in
-      let functionBinder = (Printf.printf "%s\n%!" __LOC__; irFunc.fn_binder) in
+      let functionBinder = irFunc.fn_binder in
       let params = 
         irFunc.fn_params 
-        |> List.map (fun binder -> type_of_binder binder, name_of_binder binder)
+        |> List.map (fun binder -> type_of_binder binder, var_of_binder binder)
         |> List.map (fun (irType, name) -> 
-            let wasmType = irType2Wasm irType in Some name, match wasmType with 
+            let wasmType = irType2Wasm irType in Some (PPInstruction.mangleLocalName name), match wasmType with 
               | ValType v -> v 
               | _ -> assert false
           )
       in
-      let result = match functionBinder |> type_of_binder |> irType2Wasm with
-        | FuncType f -> (
-          let f1 = f.r in match f1 with
-            | [] -> []
-            | f2::[] -> [f2]
-            | _ -> raise (NotImplemented "multiple value return")
-        ) 
-        | _ -> assert false in
+      let open Types in
+      let rec getResultType = function
+        | Function (_, _, resultType) -> irType2Wasm resultType 
+        | Primitive _ -> raise (NotImplemented __LOC__)
+        | Effect _ -> raise (NotImplemented __LOC__)
+        | Var _ -> raise (NotImplemented __LOC__)
+        | Recursive _ -> raise (NotImplemented __LOC__)
+        | Not_typed -> raise (NotImplemented __LOC__)
+        | Alias _ -> raise (NotImplemented __LOC__)
+        | Application _ -> raise (NotImplemented __LOC__)
+        | RecursiveApplication _ -> raise (NotImplemented __LOC__)
+        | Meta _ -> raise (NotImplemented __LOC__)
+        | Lolli _ -> raise (NotImplemented __LOC__)
+        | Record _ -> raise (NotImplemented __LOC__)
+        | Variant _ -> raise (NotImplemented __LOC__)
+        | Table _ -> raise (NotImplemented __LOC__)
+        | Lens _ -> raise (NotImplemented __LOC__)
+        | ForAll (_quantifiers, underlyingType) -> getResultType underlyingType
+        | Row _ -> raise (NotImplemented __LOC__)
+        | Closed -> raise (NotImplemented __LOC__)
+        (* Presence *)
+        | Absent -> raise (NotImplemented __LOC__)
+        | Present _ -> raise (NotImplemented __LOC__)
+        (* Session *)
+        | Input _ -> raise (NotImplemented __LOC__)
+        | Output _ -> raise (NotImplemented __LOC__)
+        | Select _ -> raise (NotImplemented __LOC__)
+        | Choice _ -> raise (NotImplemented __LOC__)
+        | Dual _ -> raise (NotImplemented __LOC__)
+        | End -> raise (NotImplemented __LOC__)
+      in
+      let result = getResultType (type_of_binder functionBinder) in
+        (* | _ -> assert false in *)
+      let result = match result with
+        | ValType v -> [v]
+        | _ -> assert false 
+      in
       let newFun = declareFun wasmModule (Some (PPInstruction.mangleLocalName (var_of_binder functionBinder))) params result in
       newFun
       
@@ -528,12 +551,12 @@ module Wasm = struct
       let open Ir in
       match t with
       | Extend (nameMap, valu) -> 
-        if Utility.StringMap.is_empty nameMap then (
-          match valu with 
-          | None -> true
-          | _ -> false
-        )
-        else false
+          if Utility.StringMap.is_empty nameMap then (
+            match valu with 
+            | None -> true
+            | _ -> false
+          )
+          else false
       | _ -> false
     (* let wasmUnitConstant = -1 *)
     let irValueToString: Ir.value -> string = fun t -> match t with
@@ -541,16 +564,29 @@ module Wasm = struct
       | Variable v -> string_of_int v
       | Extend _ -> if irValueIsUnit t then "(links.unit.shouldNeverBePrintedInCode)" else raise (NotImplemented __LOC__)
       | _ -> raise (NotImplemented __LOC__)
+    
+    let specialIrFuncToWasmInsc: Var.var -> string option = fun v ->
+      if v = 1 then Some "i32.add"
+      else if v = 2 then Some "i32.sub"
+      else if v = 3 then Some "i32.mul"
+      else if v = 4 then Some "i32.div_s"
+      else if v = 7 then Some "f64.add"
+      else if v = 8 then Some "f64.sub"
+      else if v = 9 then Some "f64.mul"
+      else if v = 10 then Some "f64.div"
+      else None
 
     let rec writeComputation: wasmWriter -> funcDef -> Ir.computation -> prettyPrintElement list = fun writer wasmFunc comp ->
       let (bindings, tail) = comp in
       let b1 = bindings |> List.map (fun t -> writeBinding writer wasmFunc t) |> List.flatten in
-      let t1 = tail |> writeTailComputation writer wasmFunc in
+      let t1 = writeTailComputation writer wasmFunc tail in
       b1@t1
     and writeTailComputation: wasmWriter -> funcDef -> Ir.tail_computation -> prettyPrintElement list = fun writer wasmFunc irInsc ->
       let open Ir in
       let g1 = match irInsc with
-        | Return v -> writeReturn writer wasmFunc v
+        | Return v -> 
+            if irValueIsUnit v then []
+            else writeValue writer wasmFunc v
         | Apply (f, args) -> writeApply writer wasmFunc f args
         | Special s -> writeSpecial writer wasmFunc s 
         | Case _ -> raise (NotImplemented __LOC__)
@@ -564,18 +600,8 @@ module Wasm = struct
           ) *)
         | If _ -> raise (NotImplemented __LOC__)
       in g1
-    and writeReturn: wasmWriter -> funcDef -> Ir.value -> prettyPrintElement list = fun writer wasmFunc value ->
-      let retLiteral = [Literal "return"] in
-      let returnInsc = if irValueIsUnit value then retLiteral
-      else (writeValue writer wasmFunc value)@retLiteral in
-      LineIndent::returnInsc
     and writeApply: wasmWriter -> funcDef -> Ir.value -> Ir.value list -> prettyPrintElement list = fun writer wasmFunc f args ->
-      let funToCall = match f with
-        | Variable v -> [Literal "call"; IdSep; Literal (PPInstruction.irLocalName2Wasm v)] 
-        | _ -> raise (NotImplemented __LOC__) in
-      let args' = args |> List.map (fun t -> writeValue writer wasmFunc t) in
-      let p = PPInstruction.inscArgs writer.printer funToCall args' in
-      p
+      writeApplyPure writer wasmFunc f args
     and writeApplyPure: wasmWriter -> funcDef -> Ir.value -> Ir.value list -> prettyPrintElement list = fun writer wasmFunc value args ->
       let open Ir in
       let open PPInstruction in
@@ -583,13 +609,15 @@ module Wasm = struct
       let writeBinaryOperator opName = inscLiteralArgs writer.printer opName args in
       match value with
       | TApp (appliedValue, _effects) -> (
-        match appliedValue with
-        | Variable v ->
-          if v = 1 then writeBinaryOperator "i32.add"
-          else if v = 3 then writeBinaryOperator "i32.mul"
-          else inscArgs writer.printer [Literal "call"; IdSep; Literal (irLocalName2Wasm v)] args
-        | _ -> raise (NotImplemented __LOC__)
-      )
+          match appliedValue with
+          | Variable v ->
+              let specialInscName = specialIrFuncToWasmInsc v in (
+                match specialInscName with 
+                | Some name -> writeBinaryOperator name
+                | None -> inscArgs writer.printer [Literal "call"; IdSep; Literal (irLocalName2Wasm v)] args
+              )
+          | _ -> raise (NotImplemented __LOC__)
+        )
       | _ -> raise (NotImplemented __LOC__)
     and writeSpecial: wasmWriter -> funcDef -> Ir.special -> prettyPrintElement list = fun _writer _wasmFunc _special ->
       raise (NotImplemented __LOC__)
@@ -621,14 +649,12 @@ module Wasm = struct
       PPInstruction.readVar writer.printer var
     and writeLetBinding: wasmWriter -> funcDef -> Ir.binder -> Ir.tyvar list -> Ir.tail_computation -> prettyPrintElement list = fun writer wasmFunc binder _typeVarList tailComputation ->
       let open Var in
-      let localName = PPInstruction.irLocalName2Wasm (var_of_binder binder) in
+      let localName = PPInstruction.mangleLocalName (var_of_binder binder) in
       let localType = match irType2Wasm (type_of_binder binder) with
         | ValType v -> v 
         | _ -> raise (NotImplemented __LOC__) in
       let _ = wasmFunc.locals <- wasmFunc.locals @ [Some localName, localType] in
-      let comp = match tailComputation with
-        | Return v -> writeValue writer wasmFunc v
-        | _ -> writeTailComputation writer wasmFunc tailComputation in
+      let comp = writeTailComputation writer wasmFunc tailComputation in
       PPInstruction.writeVar writer.printer (var_of_binder binder) comp
     and writeBinding: wasmWriter -> funcDef -> Ir.binding -> prettyPrintElement list = fun writer wasmFunc binding ->
       let binding' = match binding with
@@ -648,9 +674,9 @@ module Wasm = struct
       [IdSep]@(
         let (possibleName, _) = local in
         match possibleName with
-        | Some s -> [Literal s]
+        | Some s -> [Literal (PPInstruction.prependDollar s); IdSep]
         | None -> []
-      )@[IdSep; Literal (let (_, valType) = local in toStringValType valType)]
+      )@[Literal (let (_, valType) = local in toStringValType valType)]
       
     let writeWasmFunWith: wasmWriter -> funcDef -> prettyPrintElement list -> prettyPrintElement = fun writer wasmFunc body ->
       let title = [Literal "func"; IdSep; Literal (PPInstruction.prependDollar (nameOfFunc wasmFunc))] in
@@ -658,35 +684,38 @@ module Wasm = struct
       let params = (
         let p = funcType'.p in
         let p' = p |> List.map (fun t -> [Literal "param"]@(writeLocal writer t))
-          |> List.map (fun t -> [IdSep; Paren t])
-          |> List.flatten in
+                 |> List.map (fun t -> [IdSep; Paren t])
+                 |> List.flatten in
         p'
       ) in
       let resultType = List.map toStringValType funcType'.r |> List.map (fun t -> [IdSep; Literal t]) |> List.flatten in
       let resultType2 = match resultType with
         | [] -> []
-        | _ -> [IdSep; Paren ([Literal "result"; IdSep]@resultType)] in
+        | _ -> [IdSep; Paren ([Literal "result"]@resultType)] in
       let locals = wasmFunc.locals 
-        |> List.map (fun t -> Paren (Literal "local"::(writeLocal writer t)))
-        |> List.fold_left (fun l r -> match l with
-          | [] -> [r]
-          | _ -> l@[IdSep; r]
-        ) [] in
+                   |> List.map (fun t -> Paren (Literal "local"::(writeLocal writer t)))
+                   |> List.fold_left (fun l r -> match l with
+                       | [] -> [r]
+                       | _ -> l@[IdSep; r]
+                     ) [] in
       let funBody = title@params@resultType2@[IncWithLineIndent]@locals@body@[DecWithLineIndent] in
       Paren funBody
+    let writeFunctionComputation: wasmWriter -> funcDef -> Ir.computation -> prettyPrintElement = fun writer wasmFunc comp ->
+      let (bindings, tail) = comp in
+      let bindings = bindings |> List.map (writeBinding writer wasmFunc) |> List.flatten in
+      let tailComputation = tail |> writeTailComputation writer wasmFunc in
+      let tailComputation = PPInstruction.inscLiteralArgs writer.printer "return" [tailComputation] in
+      writeWasmFunWith writer wasmFunc (bindings@tailComputation)
     let writeWasmFun: wasmWriter -> funcDef -> Ir.fun_def -> prettyPrintElement = fun writer wasmFunc irFunc ->
-      writeWasmFunWith writer wasmFunc (writeComputation writer wasmFunc irFunc.fn_body)
+      writeFunctionComputation writer wasmFunc irFunc.fn_body
 
     let writeProgram: wasmWriter -> Ir.program -> prettyPrintElement = fun writer program ->
-      let (bindings, tailComputation) = program in
       let wasmModule = writer.wasmModule in
       let mainFunc = match wasmModule.st with 
         | Some k -> k.func 
         | None -> exit 0
       in
-      let bindings' = bindings |> List.map (writeBinding writer mainFunc) |> List.flatten in
-      let tailComputation' = tailComputation |> writeTailComputation writer mainFunc in
-      let mainFunc1 = writeWasmFunWith writer mainFunc (bindings'@tailComputation') in
+      let mainFunc1 = writeFunctionComputation writer mainFunc program in
       let functions = writer.funcMap |> List.map (fun t -> let (wasmFunc, irFunc) = t in writeWasmFun writer wasmFunc irFunc) in
       let allFunctions = functions@[mainFunc1] |> PPInstruction.flattenDefs in
       if writer.printer.abbreviateSingleModuleDef then Paren allFunctions
@@ -697,9 +726,6 @@ module Wasm = struct
         let g4 = Paren g3 in
         g4
       )
-    (* let writeGlobal: wasmWriter -> Types.datatype -> unit = fun writer datatype ->
-    
-      () *)
   end
 end
 

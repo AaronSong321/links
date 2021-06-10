@@ -1,0 +1,1 @@
+make && ./links -d --set=show_compiled_ir=true ./tests/wasm/b.links && wat2wasm ./tests/wasm/a.wat -o ./tests/wasm/a.wasm
