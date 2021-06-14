@@ -1,10 +1,4 @@
-var a1=2;
-var a2=3;
-fun multiply(a,b) {
-	a*b
-}
-var a3=a1+a2;
-
+var a3=1+2;
 fun mainPage(_) {
 page
 	<html>

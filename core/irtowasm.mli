@@ -1,1 +1,1 @@
-val run : Backend.result -> unit
+val run : Backend.result -> string -> unit

@@ -173,6 +173,14 @@ module Phases = struct
       |> convert (Sys.expand ->- some)
       |> privilege `System
       |> sync)
+  let wasmOutput =
+    let open Utility in
+    Settings.(option ~default:(Some "output.wat") "wat_output"
+      |> CLI.(add (long "wat-output"))
+      |> to_string from_string_option
+      |> convert (Sys.expand ->- some)
+      |> privilege `System
+      |> sync)
 
   let whole_program : Context.t -> string -> (Context.t * Types.datatype * Value.t)
     = fun initial_context filename ->
@@ -192,7 +200,10 @@ module Phases = struct
     let _ = match Settings.get clientBackend with
     | Some a ->
       if a = "js" then ()
-      else if a = "wasm" then Irtowasm.run result
+      else if a = "wasm" then Irtowasm.run result (match Settings.get wasmOutput with
+        | Some s -> s 
+        | None -> "output.wat"
+      )
       else failwith (Printf.sprintf "Unrecognised client backend option %s" a)
     | _ -> () in
     Webserver.init (valenv, nenv, tenv) globals ffi_files;

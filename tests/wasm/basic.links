@@ -14,4 +14,8 @@ fun multiplyFloat(a1,a2) {
 	var g3=a1/.a2;
 	a1 *. a2
 }
+fun fibonacci(a) {
+	if (a <= 2) 1
+	else fibonacci(a-1) + fibonacci(a-2)
+}
 a3
