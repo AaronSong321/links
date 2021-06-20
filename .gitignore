@@ -76,3 +76,4 @@ tests/wasm/*.wat
 tests/wasm/*.wasm
 tests/wasm/g.sh
 *.DS_Store
+.idea
