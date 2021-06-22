@@ -75,5 +75,7 @@ install.inc
 tests/wasm/*.wat
 tests/wasm/*.wasm
 tests/wasm/g.sh
+tests/wasm/js-proj/node_modules/
+tests/wasm/js-proj/package-lock.json
 *.DS_Store
 .idea

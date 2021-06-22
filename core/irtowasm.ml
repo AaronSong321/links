@@ -258,6 +258,7 @@ module Wasm = struct
       | CInsc_brtable of label_index list * label_index
       | CInsc_loop of type_use * instruction list
       | CInsc_call_indirect of local_index * bool * type_use * insc_semantical_param list
+      | CInsc_return_call of func_index * insc_semantical_param list
     and ref_insc = 
       | RInsc_null of heap_type
       | RInsc_is_null of insc_semantical_param
@@ -281,54 +282,24 @@ module Wasm = struct
       func_id: string option;
       func_wasm_type: func_type;
       mutable locals: (string option * val_type) list;
-      mutable body: expr
+      mutable body: expr;
+      func_export_anno: export_annotation option
     }
+    and export_annotation = string
+
+
     let name_of_func: func_def -> string = fun f -> non_null f.func_id
-    
-    (* let fold_left: wasm_type -> wasm_type -> wasm_type = fun old_type result_type ->
-      let to_combine_type: wasm_type -> wasm_type option = fun ot ->
-        match ot with 
-        | Error_type -> Some Error_type
-        | Unit_type -> None
-        | _ -> Some ot
-      in
-      let params = match old_type with 
-        | Func_type old_func_type -> (
-            let p = old_func_type.p in
-            let r = old_func_type.r in
-            let nr = match r with
-              | [] -> None
-              | single::[] -> to_combine_type (Val_type single)
-              | _ -> failwith "right recursive function types"
-            in
-            match nr with
-            | Some nr' -> (
-                match nr' with 
-                | Error_type -> None
-                | Val_type t -> Some (p @ [None, t])
-                | _ -> None(* only val_type can be used as function parameters in wasm*)
-              )
-            | None -> Some p
-          )
-        | Error_type -> None
-        | Val_type t -> Some [None, t]
-        | _ -> None
-      in
-      match params, result_type with
-      | None, _
-      | _, Error_type -> Error_type
-      | Some params', Unit_type -> Func_type { p = params'; r = [] }
-      | Some params', Val_type t -> Func_type { p = params'; r = [t] }
-      | _, _ -> Error_type *)
 
     type mem_def = {
       memory_id: string option;
-      memory_type: memory_type
+      memory_type: memory_type;
+      memory_export_anno: export_annotation option
     }
     type global_def = {
       global_id: string option;
       global_type: global_type;
-      init_value: expr
+      init_value: expr;
+      global_export_anno: export_annotation option
     }
     type export_desc =
       | ED_func of func_index
@@ -339,7 +310,7 @@ module Wasm = struct
       export_id: string;
       desc: export_desc;
     }
-    type table_def = table_type
+    type table_def = table_type * export_annotation option
     type elem_def = insc_semantical_param * func_index list
 
      
@@ -359,11 +330,12 @@ module Wasm = struct
     }
     let add_local: func_def -> string option -> val_type -> unit = fun f id v ->
       f.locals <- f.locals @ [id, v]
-    let new_func_def id func_type = {
+    let new_func_def id func_type export = {
       func_id = id;
       func_wasm_type = func_type;
       locals = [];
-      body = []
+      body = [];
+      func_export_anno = export
     }
     let add_global (m: module_def) (id: string option) (v: val_type): unit =
       let init_value_insc =
@@ -383,19 +355,25 @@ module Wasm = struct
         global_var_type = v;
         is_mutable = true
       } in
+      let remove_dollar name = 
+        if String.length name >= 1 && String.get name 0 = '$' then String.sub name 1 ((String.length name) - 1)
+        else name
+      in
       let global_def = {
         global_id = id;
         global_type = global_value_type;
-        init_value = [init_value_insc]
+        init_value = [init_value_insc];
+        global_export_anno = (match id with | Some i -> Some (remove_dollar i) | None -> None)
       } in
       m.gl <- m.gl @ [global_def]
-    let declare_fun: module_def -> string option -> param_annotator -> result_annotator -> func_def = fun module_ id p r ->
-      let func_def = new_func_def id ({ p = p; r = r }) in
+    let declare_fun: module_def -> string option -> param_annotator -> result_annotator -> export_annotation option -> func_def = fun module_ id p r export_anno ->
+      let func_def = new_func_def id ({ p = p; r = r }) export_anno in
       module_.fn <- module_.fn @ [func_def];
       func_def
 
+    let links_main_func_name = "$$links_wasm_file_func"
     let new_module id = 
-      let links_file_func = new_func_def (Some "_links_wasm_file_func") ({ p = []; r = [] }) in {
+      let links_file_func = new_func_def (Some links_main_func_name) ({ p = []; r = [] }) (Some links_main_func_name) in {
         module_id = id; 
         ty = [];
         fn = [links_file_func];
@@ -405,14 +383,14 @@ module Wasm = struct
         gl = [];
         ex = [];
         st = Some (Mni_name (name_of_func links_file_func));
-        module_tb = [{
+        module_tb = [({
           table_id = Some "$$table";
           table_type_limit = {
             min = 1;
             max = Some 1
           };
           table_type_type = Func_ref
-        }];
+        }, Some "wasm_table")];
         module_el = [];
       }
   end
@@ -503,7 +481,7 @@ module Wasm = struct
 
     module PPInstruction = struct
       let prepend_dollar p = "$" ^ p
-      let get_binder_name: Ir.binder -> string = fun binder ->
+      let get_export_name binder =
         let mangle_ir_local_name p = "_loc_" ^ string_of_int p in
         let mangle_ir_global_name p = "_glob_" ^ string_of_int p in
         let mangle_ir_var_name: Var.var -> bool -> string = fun var is_local ->
@@ -516,14 +494,16 @@ module Wasm = struct
         let name =
           if name = "" then mangle_ir_binder_name binder
           else name ^ "_" ^ (binder |> var_of_binder |> string_of_int)
-        in prepend_dollar name
-      let get_function_binder_name (binder: Ir.binder): string =
+        in name
+      let get_binder_name: Ir.binder -> string = fun binder ->
+        prepend_dollar (get_export_name binder)
+      let get_function_export_name binder =
         let name = name_of_binder binder in
         let h = string_of_int (var_of_binder binder) in
-        let name =
-          if name = "" then "_fun_" ^ h
-          else name ^ "_" ^ h
-        in prepend_dollar name
+        if name = "" then "_fun_" ^ h
+        else name ^ "_" ^ h
+      let get_function_binder_name (binder: Ir.binder): string =
+        binder |> get_function_export_name |> prepend_dollar
       (* let flatten_args: pretty_print_element list list -> pretty_print_element list = fun args ->
         List.fold_left (fun l r -> 
             match l with 
@@ -544,44 +524,8 @@ module Wasm = struct
           | l, r -> l @ [LineIndent] @ r
         ) [] args
 
-      (* let insc_args: printer -> pretty_print_element list -> pretty_print_element list list -> pretty_print_element list = fun printer insc args ->          
-        let insc_args_inner: printer -> pretty_print_element list -> pretty_print_element list -> pretty_print_element list = fun printer insc args ->
-          match printer.argument_print with
-          | Stack_style -> (
-            match args with 
-            | [] -> LineIndent::insc
-            | _ -> args @ [LineIndent] @ insc
-          )
-          | Arg_style -> 
-            [LineIndent; Paren (insc @ IncIndent::args @ [DecIndent])]
-        in
-        insc_args_inner printer insc (flatten_args args)
-      let insc_literal_args: printer -> string -> pretty_print_element list list -> pretty_print_element list = fun printer insc_name args ->
-        insc_args printer [Literal insc_name] args
-      let insc_literal_arg0: printer -> string -> pretty_print_element list = fun printer insc_name ->
-        insc_args printer [Literal insc_name] []
-      let const: printer -> CommonTypes.Constant.t -> pretty_print_element list = fun printer c ->
-        let const1: printer -> val_type -> string -> pretty_print_element list = fun printer value_type string_value_of_constant ->
-          insc_args printer [Literal (to_string_val_type value_type); Literal ".const"; IdSep; Literal string_value_of_constant] []
-        in
-        let string_value_of_constant = match c with
-          | Bool value  -> string_of_bool value
-          | Int value   -> string_of_int value
-          | Char c      -> "\"" ^ Char.escaped c ^ "\""
-          | String s    -> "\"" ^ escape_string s ^ "\""
-          | Float value -> Utility.string_of_float' value
-        in
-        let value_type = c |> type_of |> ir_primitive_type2Wasm in
-        const1 printer value_type string_value_of_constant
-      let read_var: printer -> Ir.binder -> pretty_print_element list = fun printer binder ->
-        insc_args printer [Literal (match scope_of_binder binder with | Local -> "local.get" | Global -> "global.get"); IdSep; Literal (ir_var_name2Wasm binder)] []
-      let write_var: printer -> Ir.binder -> pretty_print_element list -> pretty_print_element list = fun printer binder arg1 ->
-        insc_args printer [Literal (match scope_of_binder binder with | Local -> "local.set" | Global -> "global.set"); IdSep; Literal (ir_var_name2Wasm binder)] [arg1] *)
-
       let stringify name =
         Printf.sprintf "\"%s\"" name
-      (* let insc_inline_import outer_name inner_name =
-        Paren [Literal "import"; IdSep; Literal (stringify outer_name); IdSep; Literal (stringify inner_name)] *)
     end
 
     let give_indent_string pt = 
@@ -630,7 +574,15 @@ module Wasm = struct
     module type BINDERSET = Set with type elt = binder
     module BinderSet : BINDERSET = Set.Make(OrderedBinder)
 
+    type wasm_optimiser = {
+      opt_tail_call: bool
+    }
+    let default_optimiser () = {
+      opt_tail_call = true
+    }
+    
     type wasm_writer = {
+      optimiser: wasm_optimiser;
       printer: printer;
       writer: out_channel;
       wasm_module: module_def;
@@ -638,9 +590,11 @@ module Wasm = struct
       mutable func_map2: (binder, func_def) Hashtbl.t;
       mutable var_map: var_binder_map;
       mutable func_var: BinderSet.t;
+      mutable tail_call_set: (value, int) Hashtbl.t;
       primitive_functions: Var.var Env.String.t
     }
     let new_wasm_writer printer out_channel module_def = {
+      optimiser = default_optimiser ();
       printer = printer;
       writer = out_channel;
       wasm_module = module_def;
@@ -648,6 +602,7 @@ module Wasm = struct
       func_map2 = Hashtbl.create 2000;
       var_map = BinderMap.empty;
       func_var = BinderSet.empty;
+      tail_call_set = Hashtbl.create 1;
       primitive_functions = Lib.nenv
     }
     let add_binder writer binder = 
@@ -666,7 +621,11 @@ module Wasm = struct
       | None -> false
     let add_func_var writer binder = 
       writer.func_var <- BinderSet.add binder writer.func_var
-    (* let wasm_table_name = "$$table" *)
+      
+    let can_use_tail_call writer value =
+      match Hashtbl.find_opt writer.tail_call_set value with
+      | Some _ -> true
+      | _ -> false
     let rec get_function_pointer writer func_var =
       let dic = writer.wasm_module.fp_dic in
       match IntMap.find_opt func_var dic with
@@ -725,7 +684,7 @@ module Wasm = struct
       else
       match ir_type with
       | Primitive p -> Val_type (ir_primitive_type2Wasm p)
-      | Function (in_type, _, out_type) ->
+      | Function (in_type, _, _) ->
         let result_type = get_result ir_type in
         Func_type {
           p = get_ir_func_params in_type; r = [result_type]
@@ -807,7 +766,8 @@ module Wasm = struct
         | Unit_type -> []
         | t -> [to_val_type t]
       in
-      let new_fun = declare_fun wasm_module (Some (PPInstruction.get_function_binder_name function_binder)) params result in
+      let export_anno = if Scope.is_global (scope_of_binder ir_func.fn_binder) then Some (PPInstruction.get_export_name function_binder) else None in
+      let new_fun = declare_fun wasm_module (Some (PPInstruction.get_function_binder_name function_binder)) params result export_anno in
       new_fun
       
     let ir_value_is_unit: Ir.value -> bool = fun t ->
@@ -820,39 +780,7 @@ module Wasm = struct
         )
         else false
       | _ -> false
-      
-    (* type primitive_wasm_func_arity =
-      | Zero of string
-      | One of string
-      | Two of string
-      | Three of string
-      | Any of string *)
 
-    (* open PPInstruction *)
-    (* let primitive_ir_func_table =
-      let table = [
-        "+", Two "add";
-        "-", Two "sub";
-        "*", Two "mul";
-        "/", Two "div_s";
-        "mod", Two "rem_s";
-        "+.", Two "add";
-        "-.", Two "sub";
-        "*.", Two "mul";
-        "/.", Two "div";
-        "negatef", Two "neg";
-        "==", Two "eq";
-        "!=", Two "ne";
-        ">=", Two "lt";
-        "<=", Two "gt";
-        "floor", One "floor";
-        "ceiling", One "ceil";
-        "sqrt", One "sqrt";
-        "int_to_float", Zero ((to_string_val_type links_float_value_type) ^ ".convert_" ^ (to_string_val_type links_int_value_type) ^ "_s");
-        "float_to_int", Zero ((to_string_val_type links_int_value_type) ^ ".trunc_sat_" ^ (to_string_val_type links_float_value_type) ^ "_s");
-      ] in
-      Utility.StringMap.from_alist table
-    let find_primitive_func_name (v: Var.var): primitive_wasm_func_arity option = Utility.StringMap.find_opt (primitive_name v) primitive_ir_func_table *)
     let nenv' = Env.String.fold (fun key value acc -> Env.Int.bind value key acc) Lib.nenv Env.Int.empty
     let find_ir_var_type v = Env.String.find (Env.Int.find v nenv') Lib.type_env
 
@@ -901,17 +829,6 @@ module Wasm = struct
       )
       | Closure _ -> raise (Not_implemented __LOC__)
       | Coerce _ -> raise (Not_implemented __LOC__)
-    (* let type_of_tail_computation (writer: wasm_writer) (comp: tail_computation) =
-      match comp with
-      | Return v -> type_of_value writer v
-      | Apply (func, value) -> (
-        match func with
-        | TApp (func_value, _) -> type_of_apply writer func_value value
-        | _ -> raise (Not_implemented __LOC__)
-      )
-      | Special _ -> links_int_type
-      | Case _ -> links_int_type
-      | If _ -> links_int_type *)
 
     (* let is_constant0 (v: Ir.value) =
       match v with
@@ -923,322 +840,6 @@ module Wasm = struct
         | _ -> false
       )
       | _ -> false *)
-    (* let primitive_ir_func_to_wasm_insc (v: var) (operands: Ir.value list) (operator_types: val_type list) =
-      let open Lib in
-      if is_primitive_var v then 
-        let operator_name = find_primitive_func_name v in
-        match operator_name with 
-        | Some op -> (
-          let op_type_name = List.hd operator_types |> to_string_val_type in
-          let operator_name1 = 
-            match List.hd operator_types with
-            | Number_type (n1, _) -> (
-              match n1 with
-              | NInt -> (
-                let op1 = 
-                  match op with
-                  | Two op3 -> 
-                    if op3 = "lt" || op3 = "gt" || op3 = "le" || op3 = "ge" then Two (op3 ^ "_s") 
-                    else if op3 = "eq" && List.exists is_constant0 operands then One "eqz" 
-                    else op
-                  | _ -> op
-                in op1
-              )
-              | _ -> op
-            )
-            | _ -> op
-          in
-          let temp t = Some (op_type_name ^ "." ^ t) in
-          match operator_name1 with
-          | Zero t -> Some t
-          | One t -> temp t
-          | Two t -> temp t
-          | Three t -> temp t
-          | Any t -> temp t
-        )
-        | None -> None
-      else None *)
-
-    (* let rec write_primitive_ir_func_call writer wasm_func v operands =
-      let operator_types = operands |> List.map (fun t -> type_of_value writer t |> to_val_type) in
-      let insc_name = primitive_ir_func_to_wasm_insc v operands operator_types in
-      let write_arg = write_value writer wasm_func in
-      let elements = match insc_name with
-        | Some name -> 
-          if SysExt.get_extension name = ".eqz" then
-            let arg0 = List.nth operands 0 in
-            let arg1 = List.nth operands 1 in
-            if is_constant0 arg0 then Some (insc_literal_args writer.printer name [arg1 |> write_arg])
-            else Some (insc_literal_args writer.printer name [arg0 |> write_arg])
-          else
-            Some (insc_literal_args writer.printer name (List.map write_arg operands))
-        | None -> None
-      in elements
-    and write_normal_ir_func_call writer wasm_func v operands =
-      BinderMap.iter (fun t _ -> Printf.printf "known binder: %i\n%!" t) writer.var_map;
-      Printf.printf "finished%!";
-      let binder = find_binder writer v |> non_null in
-      let insc_lit = get_function_binder_name binder in
-      insc_args writer.printer [Literal "call"; IdSep; Literal (prepend_dollar insc_lit)] (List.map (write_value writer wasm_func) operands)
-    and write_func_pointer_call writer (v: Var.var) operands =
-      let write_wasm_func_sig func =
-        let process f = List.map to_string_val_type f |> List.map (fun t -> [IdSep; Literal t]) |> List.flatten in
-        let params = Paren ([Literal "param"] @ (func.p |> List.map (fun (_name, t) -> t) |> process)) in
-        let result = Paren ([Literal "result"] @ (process func.r)) in
-        [params; IdSep; result]
-      in
-      let binder = v |> find_binder writer |> non_null in
-      let read_func_var = binder |> write_read_var writer in
-      let func_type = binder |> type_of_binder |> ir_type2Wasm in
-      let type_insc = match func_type with
-        | Func_type t -> write_wasm_func_sig t
-        | _ -> raise (Not_implemented __LOC__)
-      in
-      insc_args writer.printer (Literal "call_indirect"::IdSep::type_insc) (read_func_var::operands)
-    and write_ir_func_call writer wasm_func (v: Var.var) operands =
-      let try_fp = if is_func_var writer v then write_func_pointer_call writer v (List.map (write_value writer wasm_func) operands)
-      else (
-        let try1 = write_primitive_ir_func_call writer wasm_func v operands in
-        let try2 = match try1 with
-        | Some s -> s 
-        | None -> write_normal_ir_func_call writer wasm_func v operands
-        in try2
-      )
-      in try_fp
-    and write_computation: wasm_writer -> func_def -> computation -> pretty_print_element list = fun writer wasm_func comp ->
-      let (bindings, tail) = comp in
-      let b1 = bindings |> List.map (fun t -> write_binding writer wasm_func t) |> List.flatten in
-      let t1 = write_tail_computation writer wasm_func tail in
-      b1 @ t1
-    and write_tail_computation: wasm_writer -> func_def -> tail_computation -> pretty_print_element list = fun writer wasm_func ir_insc ->
-      let g1 = match ir_insc with
-        | Return v -> 
-            if ir_value_is_unit v then []
-            else write_value writer wasm_func v
-        | Apply (f, args) -> write_apply writer wasm_func f args
-        | Special s -> write_special writer wasm_func s 
-        | Case _ -> raise (Not_implemented __LOC__)
-        | If (value, if_ins, else_ins) -> write_if_expression writer wasm_func value if_ins else_ins
-      in g1
-    and write_if_expression writer wasm_func value if_ins else_ins =
-      let value_elements =
-      match writer.printer.ctrl_insc_style with
-      | Folded_style ->
-        let old_style = writer.printer.argument_print in
-        writer.printer.argument_print <- Arg_style;
-        let a = write_value writer wasm_func value in
-        writer.printer.argument_print <- old_style;
-        a
-      | Plain_style -> write_value writer wasm_func value
-      in
-      let if_elements = write_computation writer wasm_func if_ins in
-      let else_elements = write_computation writer wasm_func else_ins in
-      let (_, if_result) = if_ins in
-      let if_result_type = type_of_tail_computation writer if_result in
-      let (_, else_result) = else_ins in
-      let else_result_type = type_of_tail_computation writer else_result in
-      let _ = if if_result_type = else_result_type then ()
-        else raise (Not_implemented "if else type mismatch")
-      in
-      let result_type_element = Paren [Literal "result"; IdSep; Literal (Grammar.to_string if_result_type)] in
-      match writer.printer.ctrl_insc_style with
-      | Plain_style -> (
-        let all = value_elements @ [LineIndent; Literal "if"; IdSep; result_type_element; IncIndent] @ if_elements @ [DecWithLineIndent; Literal "else"; IncIndent] @ else_elements @ [DecWithLineIndent; Literal "end"] in
-        all
-      )
-      | Folded_style -> (
-        let connect keyword_name elements =
-          if List.length elements <= 1 then Paren ([Literal keyword_name; IdSep] @ elements)
-          else Paren ([Literal keyword_name; IncIndent] @ elements @ [DecWithLineIndent])
-        in
-        let then_element = connect "then" if_elements in
-        let else_element = connect "else" else_elements in
-        let all = Paren ([Literal "if"; IdSep; result_type_element; IncIndent] @ value_elements @ [LineIndent; then_element; LineIndent; else_element; DecWithLineIndent]) in
-        [LineIndent; all]
-      )
-    and write_apply: wasm_writer -> func_def -> Ir.value -> Ir.value list -> pretty_print_element list = fun writer wasm_func f args ->
-      write_apply_pure writer wasm_func f args
-    and write_apply_pure: wasm_writer -> func_def -> Ir.value -> Ir.value list -> pretty_print_element list = fun writer wasm_func value args ->
-      match value with
-      | TApp (applied_value, _) -> (
-        match applied_value with
-        | Variable v -> write_ir_func_call writer wasm_func v args
-        | _ -> raise (Not_implemented __LOC__)
-      )
-      | _ -> raise (Not_implemented __LOC__)
-    and write_special: wasm_writer -> func_def -> Ir.special -> pretty_print_element list = fun _writer _wasm_func _special ->
-      raise (Not_implemented __LOC__)
-    and write_value: wasm_writer -> func_def -> Ir.value -> pretty_print_element list = fun writer wasm_func ir_value ->
-      let write_func_value var =
-        let fp = var |> get_function_pointer writer in
-        insc_args writer.printer [Literal "i32.load"; IdSep; Literal "offset="; Literal (string_of_int (wasm_func_pointer_size * fp))] []
-      in
-      match ir_value with
-      | Constant c -> write_constant writer c
-      | Variable v -> write_read_var writer (find_binder writer v |> (fun t -> match t with | Some t -> t | None -> raise (Not_implemented (string_of_int v))))
-      | ApplyPure (f, args) -> write_apply_pure writer wasm_func f args
-      | Project  _ -> raise (Not_implemented __LOC__)
-      | Extend _ -> raise (Not_implemented __LOC__)
-      | Erase  _ -> raise (Not_implemented __LOC__)
-      | Inject  _ -> raise (Not_implemented __LOC__)
-      | TAbs  _ -> raise (Not_implemented __LOC__)
-      (* TApp is probably function value, treat it as is *)
-      | TApp (var, _tyargs) -> (
-        match var with
-        | Variable v -> write_func_value v
-        | _ -> raise (Not_implemented __LOC__)
-      )
-      | XmlNode _ -> raise (Not_implemented __LOC__)
-      | Closure _ -> raise (Not_implemented __LOC__)
-      | Coerce _ -> raise (Not_implemented __LOC__)
-    and write_constant: wasm_writer -> CommonTypes.Constant.t -> pretty_print_element list = fun writer constant ->
-      const writer.printer constant
-    and write_read_var: wasm_writer -> Ir.binder -> pretty_print_element list = fun writer binder ->
-      read_var writer.printer binder
-    and write_let_binding: wasm_writer -> func_def -> Ir.binder -> Ir.tyvar list -> Ir.tail_computation -> pretty_print_element list = fun writer wasm_func binder _type_var_list tail_computation ->
-      let write_value_let_binding v =
-        let local_name = get_binder_name binder in
-        if scope_of_binder binder |> Scope.is_local then add_local wasm_func (Some local_name) v 
-        else add_global writer.wasm_module (Some local_name) v;
-        let comp = write_tail_computation writer wasm_func tail_computation in
-        write_var writer.printer binder comp
-      in
-      let write_func_let_binding _f =
-        let local_name = get_binder_name binder in
-        if scope_of_binder binder |> Scope.is_local then add_local wasm_func (Some local_name) (Ref_type (Func_ref))
-        else add_global writer.wasm_module (Some local_name) (Ref_type (Func_ref));
-        let comp = write_tail_computation writer wasm_func tail_computation in
-        add_func_var writer binder;
-        write_var writer.printer binder comp
-      in
-      add_binder writer binder;
-      let local_type = ir_type2Wasm (type_of_binder binder) in
-      let local_type1 = match local_type with
-        | Val_type v -> write_value_let_binding v 
-        | Func_type f -> write_func_let_binding f
-      in local_type1
-    and write_binding: wasm_writer -> func_def -> Ir.binding -> pretty_print_element list = fun writer wasm_func binding ->
-      let binding' = match binding with
-        | Let (binder, (type_var_list, tail_computation)) -> write_let_binding writer wasm_func binder type_var_list tail_computation
-        | Fun fun_def -> 
-          collect_ir_fun writer fun_def; []
-        | Rec fun_defs ->
-          List.iter (collect_ir_fun writer) fun_defs; []
-        | _ -> assert false
-      in binding'
-    and collect_ir_fun: wasm_writer -> Ir.fun_def -> unit = fun writer ir_func ->
-      let wasm_func = ir_func2wasm writer.wasm_module ir_func in
-      ir_func.fn_params |> List.iter (add_binder writer);
-      writer.func_map <- writer.func_map @ [wasm_func, ir_func];
-      add_binder writer ir_func.fn_binder
-
-    and write_local: wasm_writer -> string option * val_type -> pretty_print_element list = fun _writer local ->
-      [IdSep] @ (
-        let (possible_name, _) = local in
-        match possible_name with
-        | Some s -> [Literal (prepend_dollar s); IdSep]
-        | None -> []
-      ) @ [Literal (let (_, val_type) = local in to_string_val_type val_type)]
-    and write_global (_writer: wasm_writer) global_name val_type is_mutable =
-      let name_literals = match global_name with
-      | Some s -> [Literal (prepend_dollar s); IdSep]
-      | None -> [] in
-      let type_literals = Literal (to_string_val_type val_type) in
-      let type_literals = if is_mutable then Paren [Literal "mut"; IdSep; type_literals] else type_literals in
-      let init_literals = Paren [Literal (to_string_val_type val_type ^ ".const"); IdSep; Literal "0"] in
-      let elements = [Literal "global"; IdSep] @ name_literals @ [type_literals; IdSep; init_literals] in
-      Paren elements
-      
-    and write_wasm_func_params writer (wasm_func: func_def) =
-      let func_type = wasm_func.wasm_type in
-      func_type.p
-      |> List.map (fun t -> [Literal "param"] @ (write_local writer t))
-      |> List.map (fun t -> [IdSep; Paren t])
-      |> List.flatten
-    and write_wasm_func_result _writer (wasm_func: func_def) =
-      let result_type = List.map to_string_val_type wasm_func.wasm_type.r |> List.map (fun t -> [IdSep; Literal t]) |> List.flatten in
-      match result_type with
-        | [] -> []
-        | _ -> [IdSep; Paren ([Literal "result"] @ result_type)]
-    and write_ir_func_sig writer ir_func =
-      let wasm_func = ir_func2wasm writer.wasm_module ir_func in
-      (write_wasm_func_params writer wasm_func) @ (write_wasm_func_result writer wasm_func)
-    and write_wasm_func_title_params writer wasm_func =
-      let title = [Literal "func"; IdSep; Literal (prepend_dollar (name_of_func wasm_func))] in
-      let params = write_wasm_func_params writer wasm_func in
-      title @ params
-    let write_wasm_fun_locals writer wasm_func =
-      let locals = wasm_func.locals 
-        |> List.map (fun t -> Paren (Literal "local"::(write_local writer t)))
-        |> List.fold_left (fun l r -> match l with
-          | [] -> [r]
-          | _ -> l @ [IdSep; r]
-        ) [] in
-      let locals = match locals with
-        | [] -> [IncIndent]
-        | _ -> IncWithLineIndent::locals in
-      locals
-    let write_wasm_fun_with: wasm_writer -> func_def -> pretty_print_element list -> pretty_print_element = fun writer wasm_func body ->
-      let title_params = write_wasm_func_title_params writer wasm_func in
-      let results = write_wasm_func_result writer wasm_func in
-      let locals = write_wasm_fun_locals writer wasm_func in
-      let fun_body = title_params @ results @ locals @ body @ [DecWithLineIndent] in
-      Paren fun_body
-    let write_main_func writer wasm_func body =
-      let (bindings, tail) = body in
-      let bindings = bindings |> List.map (write_binding writer wasm_func) |> List.flatten in
-      let tail_computation = tail |> write_tail_computation writer wasm_func in
-      let pop = if type_of_tail_computation writer tail = links_unit_type then [] else insc_literal_arg0 writer.printer "drop" in
-      let body = bindings @ tail_computation @ pop in
-      let title_params = write_wasm_func_title_params writer wasm_func in
-      let result_type1 = [] in
-      let locals = write_wasm_fun_locals writer wasm_func in
-      let fun_body = title_params @ result_type1 @ locals @ body @ [DecWithLineIndent] in
-      Paren fun_body
-    let write_function_computation: wasm_writer -> func_def -> computation -> pretty_print_element = fun writer wasm_func body ->
-      let (bindings, tail) = body in
-      let bindings = bindings |> List.map (write_binding writer wasm_func) |> List.flatten in
-      let tail_computation = tail |> write_tail_computation writer wasm_func in
-      write_wasm_fun_with writer wasm_func (bindings @ tail_computation)
-    let write_wasm_fun: wasm_writer -> func_def -> Ir.fun_def -> pretty_print_element = fun writer wasm_func ir_func ->
-      write_function_computation writer wasm_func ir_func.fn_body
-    let write_globals writer =
-      let globals = writer.wasm_module.gl in
-      let global_elements = List.map (fun (t: global_def) -> write_global writer t.global_id t.global_type.global_var_type t.global_type.is_mutable) globals in
-      flatten_defs global_elements
-    let write_tables writer =
-      let fp = func_pointer_number writer in
-      Paren [Literal "table"; IdSep; Literal wasm_table_name; IdSep; Literal (string_of_int fp); IdSep; Literal "funcref"]
-    let write_elements writer =
-      
-      let r = writer.wasm_module.fp_dic 
-        |> IntMapExt.map (fun key _ -> key |> find_binder writer |> non_null |> get_function_binder_name |> prepend_dollar)
-        |> List.map (fun name -> [IdSep; Literal name])
-        |> List.flatten in
-      Paren ([Literal "elem"; IdSep; Paren [Literal "i32.const"; IdSep; Literal "1"]; IdSep; Literal "func"] @ r)
-    let write_program: wasm_writer -> Ir.program -> pretty_print_element = fun writer program ->
-      let wasm_module = writer.wasm_module in
-      let main_func = List.hd wasm_module.fn in
-      let main_func1 = write_main_func writer main_func program in
-      let functions = writer.func_map |> List.map (fun t -> let (wasm_func, ir_func) = t in write_wasm_fun writer wasm_func ir_func) in
-      let functions = functions @ [main_func1] |> flatten_defs in
-      let globals = write_globals writer in
-      let tables = [write_tables writer] in
-      let elements = [write_elements writer] in
-      let module_defs = flatten_parts [globals; functions; tables; elements] in
-      if writer.printer.abbreviate_single_module_def then Paren module_defs
-      else (
-        let g1 = [Literal "module"; IdSep] in
-        let g2 = g1 @ [Literal (prepend_dollar wasm_module.module_id)] in
-        let g3 = g2 @ [IncWithLineIndent] @ module_defs @ [DecWithLineIndent] in
-        let g4 = Paren g3 in
-        g4
-      )
-
-    let write_ir2Wasm writer program =
-      let ppe = write_program writer program in
-      to_string writer.printer ppe |> Printf.fprintf writer.writer "%s";
-      close_out writer.writer *)
   end
 
   module Ir2WasmAst = struct
@@ -1259,35 +860,76 @@ module Wasm = struct
             min = 0;
             max = None;
           }
-        }
+        };
+        memory_export_anno = Some "wasm_memory"
       }];
       gl = [];
       ex = [];
       st = None;
-      module_tb = [{
+      module_tb = [({
         table_id = Some "$$table";
         table_type_limit = {
           min = 1;
           max = Some 1
         };
         table_type_type = Func_ref
-      }];
+      }, Some "wasm_table")];
       module_el = [];
     }
 
-    let links_main_func_name = "$_links_wasm_file_func"
+    module OptimiseTailCall = struct
+      let rec check_computation tail_call_set func_v computation =
+        let (bindings, tail) = computation in
+        List.iter (check_binding tail_call_set) bindings;
+        check_tail_computation tail_call_set func_v tail
+      and check_binding tail_call_set binding =
+        match binding with
+        | Fun f -> check_func tail_call_set f 
+        | Rec fs -> List.iter (check_func tail_call_set) fs
+        | _ -> ()
+      and check_func tail_call_set func =
+        let (bindings, computation) = func.fn_body in 
+        List.iter (check_binding tail_call_set) bindings;
+        check_tail_computation tail_call_set (var_of_binder func.fn_binder) computation
+      and check_tail_computation tail_call_set func_v tail =
+        match tail with
+        | Return _ -> ()
+        | Apply (value, _) -> check_value tail_call_set func_v value
+        | Special _ -> ()
+        | Case (_, values, default_case) -> (
+          StringMap.iter (fun _ case_pair ->
+            let (_, tail) = case_pair in
+            check_computation tail_call_set func_v tail
+          ) values;
+          match default_case with
+          | Some case -> let (_, computation) = case in check_computation tail_call_set func_v computation
+          | None -> ()
+        )
+        | If (_, if_tail, else_tail) ->
+          check_computation tail_call_set func_v if_tail;
+          check_computation tail_call_set func_v else_tail
+      and check_value tail_call_set func_v value =
+        match value with
+        | TApp (applied_value, _) -> (
+          match applied_value with 
+          | Variable v -> if v = func_v then Hashtbl.add tail_call_set value 1 else ()
+          | _ -> ()
+        )
+        | ApplyPure (applied_value, _) -> check_value tail_call_set func_v applied_value
+        | _ -> ()
+
+      let opt_tail_call program =
+        let tail_calls = Hashtbl.create 1000 in
+        let (high_level_bindings, _) = program in
+        List.iter (check_binding tail_calls) high_level_bindings;
+        tail_calls
+    end
+
     let rec collect_program writer program =
       let (bindings, _) = program in
-      let main_func = declare_fun writer.wasm_module (Some links_main_func_name) [] [] in
+      let main_func = declare_fun writer.wasm_module (Some links_main_func_name) [] [] (Some links_main_func_name) in
       bindings |> List.iter (collect_binding writer main_func);
       (* main func must have type [] -> [] *)
-      (* let main_func_type = type_of_tail_computation writer tail_computation in
-      let main_func_type = match main_func_type with
-        | Val_type t -> [t]
-        | Unit_type -> []
-        | _ -> assert false
-      in
-      main_func.func_wasm_type <- { p = []; r = main_func_type }; *)
       writer.wasm_module.st <- Some (Mni_name (name_of_func main_func));
     and collect_binding writer func binding =
       match binding with
@@ -1367,10 +1009,14 @@ module Wasm = struct
       | If (value, if_comp, else_comp) -> conv_if writer func value if_comp else_comp
     and conv_if writer func value if_comp else_comp =
       let value1 = conv_value writer func value in
-      let if1: instruction list = conv_computation writer func if_comp in
-      let else1: instruction list = conv_computation writer func else_comp in
-      let if_type: wasm_type = type_of_comp_group writer [if_comp; else_comp] in
-      let insc = CInsc_if (TU_def { p = []; r = [to_val_type if_type] }, value1, if1, else1) in
+      let if1 = conv_computation writer func if_comp in
+      let else1 = conv_computation writer func else_comp in
+      let if_type = type_of_comp_group writer [if_comp; else_comp] in
+      let if_type = match if_type with
+        | Unit_type -> []
+        | _ -> [to_val_type if_type]
+      in
+      let insc = CInsc_if (TU_def { p = []; r = if_type }, value1, if1, else1) in
       Control_insc insc
     and conv_main_func writer program =
       let (bindings, tail_computation) = program in
@@ -1432,7 +1078,7 @@ module Wasm = struct
       | Variable v -> 
         conv_read_var (find_binder writer v |> (fun t -> match t with | Some t -> t | None -> raise (Not_implemented (string_of_int v))))
       | ApplyPure (f, args) -> conv_apply_pure writer func f args
-      | Project  _ -> raise (Not_implemented __LOC__)
+      | Project  _ -> Printf.printf "project: %s\n" (string_of_value ir_value) ; raise (Not_implemented __LOC__)
       | Extend _ -> raise (Not_implemented __LOC__)
       | Erase  _ -> raise (Not_implemented __LOC__)
       | Inject  _ -> raise (Not_implemented __LOC__)
@@ -1449,9 +1095,20 @@ module Wasm = struct
     and conv_apply_pure writer func value args =
       match value with
       | TApp (applied_value, _) -> (
-        match applied_value with
+        let call_insc = match applied_value with
         | Variable v -> conv_ir_func_call writer func v args
         | _ -> raise (Not_implemented __LOC__)
+        in
+        if can_use_tail_call writer value then (
+          match call_insc with
+          | Control_insc c -> (
+            match c with
+            | CInsc_call (a, b) -> Control_insc (CInsc_return_call (a, b))
+            | _ -> call_insc
+          )
+          | _ -> call_insc
+        )
+        else call_insc
       )
       | _ -> raise (Not_implemented __LOC__)
     and conv_apply writer func value args = conv_apply_pure writer func value args 
@@ -1493,8 +1150,7 @@ module Wasm = struct
       in
       Numeric_insc insc
     and conv_normal_ir_func_call writer func v operands =
-      let ops = List.map (conv_value writer func) operands in
-          
+      let ops = List.map (conv_value writer func) operands in 
       let func_index = Mni_name (find_binder writer v |> non_null |> get_function_binder_name) in
       let insc = CInsc_call (func_index, ops) in
       Control_insc insc
@@ -1565,7 +1221,7 @@ module Wasm = struct
       Paren parts
     and write_memory memory =
       let limit = write_limit memory.memory_type.memory_type_limit in
-      let p = [Literal "memory"; IdSep] @ (match memory.memory_id with | Some s -> [Literal s; IdSep] | None -> []) @ limit in
+      let p = [Literal "memory"] @ (match memory.memory_id with | Some s -> [IdSep; Literal s] | None -> []) @ (write_export_annotation memory.memory_export_anno) @ [IdSep] @ limit in
       Paren p 
     and write_limit limit =
       match limit.max with
@@ -1573,15 +1229,16 @@ module Wasm = struct
       | None -> [Literal (string_of_int limit.min)]
     and write_global printer global =
       let global_type = global.global_type in
-      let t = [Literal "global"; IdSep] in
+      let t = [Literal "global"] in
       let t = match global.global_id with
-        | Some id -> t @ [Literal id; IdSep]
+        | Some id -> t @ [IdSep; Literal id]
         | None -> t
       in
+      let t = t @ (write_export_annotation (global.global_export_anno)) in
       let type_node = Literal (to_string_val_type global_type.global_var_type) in
       let type_node = if global_type.is_mutable then Paren [Literal "mut"; IdSep; type_node] else type_node in
       let init_node = write_instructions_inline printer global.init_value in
-      Paren (t @ [type_node] @ [IdSep; Paren init_node])
+      Paren (t @ [IdSep; type_node] @ [IdSep; Paren init_node])
     and write_mono_index index =
       match index with
       | Mni_int number -> Literal (string_of_int number)
@@ -1602,11 +1259,12 @@ module Wasm = struct
       | None -> Empty
     and write_table writer tb =
       let func_num =  writer.wasm_module.fp_num + 1 in
-      tb.table_type_limit.min <- func_num;
-      (match tb.table_type_limit.max with
-      | Some _ -> tb.table_type_limit.max <- Some func_num
+      let (table_type, export_anno) = tb in
+      table_type.table_type_limit.min <- func_num;
+      (match table_type.table_type_limit.max with
+      | Some _ -> table_type.table_type_limit.max <- Some func_num
       | None -> ());
-      Paren ([Literal "table"; IdSep] @ (write_limit tb.table_type_limit) @ [IdSep; Literal "funcref"])
+      Paren ([Literal "table"] @ (write_export_annotation export_anno) @ [IdSep] @ (write_limit table_type.table_type_limit) @ [IdSep; Literal "funcref"])
     and write_element writer =
       let elems = IntMapExt.map (fun var _ -> [IdSep; Literal (var |> find_binder writer |> non_null |> get_function_binder_name)]) writer.wasm_module.fp_dic |> List.flatten in
       Paren ([Literal "elem"; IdSep; Paren [Literal "i32.const 1"]; IdSep; Literal "func"] @ elems)
@@ -1631,7 +1289,7 @@ module Wasm = struct
       | [] -> [] 
       | a -> a @ [LineIndent] in
       let insc_nodes = func.body |> List.map (write_instruction writer.printer) |> List.flatten |> ListExt.skip_while (function | LineIndent -> true | _ -> false) in
-      let nodes = [Literal "func"] @ name_nodes @ func_type_nodes @ [IncWithLineIndent] @ local_nodes @ insc_nodes @ [DecWithLineIndent] in
+      let nodes = [Literal "func"] @ name_nodes @ (write_export_annotation func.func_export_anno) @ func_type_nodes @ [IncWithLineIndent] @ local_nodes @ insc_nodes @ [DecWithLineIndent] in
       Paren nodes
     and write_func_type func_type =
       let write_param param =
@@ -1764,6 +1422,11 @@ module Wasm = struct
       | NInsc_reinterpret _ -> raise (Unreachable __LOC__)
 
     and write_control_insc printer insc =
+      let write_call insc_name func_index args =
+        let call_insc = write_insc_name_with_index insc_name func_index in
+        let args = List.map (write_instruction printer) args in
+        insc_args printer call_insc args
+      in
       match insc with
       | CInsc_nop -> [Empty]
       | CInsc_if (type_use, if_value, inscs1, inscs2) -> (      
@@ -1787,11 +1450,7 @@ module Wasm = struct
         | Plain_style ->
           value_elements @ [LineIndent] @ (write_insc_name_with_arg "if" tn) @ [IncIndent] @ in1 @ [DecWithLineIndent; Literal "else"; IncIndent] @ in2 @ [DecWithLineIndent; Literal "end"]
       )
-      | CInsc_call (func_index, args) -> (
-        let call_insc = write_insc_name_with_index "call" func_index in
-        let args = List.map (write_instruction printer) args in
-        insc_args printer call_insc args
-      )
+      | CInsc_call (func_index, args) -> write_call "call" func_index args
       | CInsc_call_indirect (local_index, var_is_local, type_use, args) -> (
         let call_insc = write_insc_name_with_arg "call_indirect" (write_type_use printer type_use) in
         let get_var_insc = LineIndent::(if var_is_local then write_insc_name_with_index "local.get" local_index else write_insc_name_with_index "global.get" local_index) in
@@ -1799,6 +1458,7 @@ module Wasm = struct
       )
       | CInsc_unreachable -> [LineIndent; Literal "unreachable"]
       | CInsc_nop -> [LineIndent; Literal "nop"]
+      | CInsc_return_call (func_index, args) -> write_call "return_call" func_index args
       | _ -> assert false
     and write_type_use _printer type_use =
       let use_index index =
@@ -1851,9 +1511,14 @@ module Wasm = struct
         | _ -> i
       ) 
       | _ -> i
+    and write_export_annotation export_anno =
+      match export_anno with
+      | Some name -> [IdSep; Paren [Literal "export"; IdSep; Literal (stringify name)]]
+      | None -> []
 
 
     let compile_links_ir_to_wasm writer program =
+      if writer.optimiser.opt_tail_call then writer.tail_call_set <- OptimiseTailCall.opt_tail_call program else ();
       collect_program writer program;
       conv_program writer program;
       let parts = write_program writer in
@@ -1867,12 +1532,6 @@ end
 open Wasm
 let run (result: Backend.result) output_wat =
   let program = result.Backend.program in
-  (* let output_stream = open_out output_wat in
-  let writer = Wasm.Pretty_printing.new_wasm_writer (Wasm.Pretty_printing.default_printer ()) output_stream (Wasm.Grammar.new_module "default_module") in
-  let _ = write_ir2Wasm writer program in *)
-  (* let output_stream2 = open_out ((SysExt.get_file_name_without_extension output_wat) ^ "-reverse-style.wat") in
-  let writer2 = Wasm.Pretty_printing.new_wasm_writer (Wasm.Pretty_printing.reverse_style_printer ()) output_stream2 (Wasm.Grammar.new_module "default_module") in
-  let _ = write_ir2Wasm writer2 program in *)
   let output_stream2 = open_out ((SysExt.get_file_name_without_extension output_wat) ^ ".wat") in
-  let writer2 = Wasm.Pretty_printing.new_wasm_writer (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$default_module") in
+  let writer2 = Wasm.Pretty_printing.new_wasm_writer (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$$default_module") in
   Ir2WasmAst.compile_links_ir_to_wasm writer2 program

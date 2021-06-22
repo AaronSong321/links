@@ -1,0 +1,11 @@
+fun factorial(n) {
+	fun alt(n, acc) {
+		if (n == 0) acc
+		else alt(n-1, acc*n)
+	}
+	alt(n, 1)
+}
+fun count(n) {
+	if (n == 0) ()
+	else count(n-1)
+}

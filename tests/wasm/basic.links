@@ -2,14 +2,13 @@ var a1=2;
 var a2=3;
 var a3=a1+a2;
 fun does(a1,a2){
+	var g1=a1-a2;
 	fun justDoNothing() {
 		()
 	}
-	var g1=a1-a2;
 	var g1_=a1+a2;
 	var g2=a1/a2;
 	#var g3 = FloatToInt(IntToFloat(a1));
-	#()
 	g2
 }
 fun multiplyFloat(a1,a2) {
