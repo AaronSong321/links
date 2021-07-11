@@ -931,8 +931,11 @@ struct
   let eval : Value.env -> program -> result =
     fun env -> computation env K.empty
 
+  let enable_wasm_performance = Settings.get Irtowasm.Wasm_performance.measure_wasm_performance
   let run_program : Value.env -> Ir.program -> (Value.env * Value.t) =
     fun env program ->
+      let before_run = Unix.gettimeofday () *. 1000.0 in
+      let return =
       try (
         Proc.start (fun () -> eval env program)
       ) with
@@ -940,6 +943,14 @@ struct
             raise (internal_error ("NotFound " ^ s ^
               " while interpreting."))
         | Not_found  -> raise (internal_error ("Not_found while interpreting."))
+      in
+      let after_run = Unix.gettimeofday () *. 1000.0 in
+      let _ = if enable_wasm_performance then 
+        let output_channel = open_out ((Sys.getcwd ()) ^ "/tests/wasm/performance-proj/server_execution_time.txt") in
+        Printf.fprintf output_channel "server-ocaml: %f\n" (after_run -. before_run);
+        close_out output_channel
+      else () in
+      return
 end
 
 module type EVAL = functor (Webs : WEBSERVER) -> sig

@@ -166,7 +166,7 @@ module Phases = struct
   let clientBackend =
     let clientBackendOptions = ["js"; "wasm"] in
     let open Utility in
-    Settings.(option ~default:(Some "wasm") "client_backend"
+    Settings.(option ~default:(Some "js") "client_backend"
       |> synopsis (Printf.sprintf "Choose backend for client (values: %s)" (String.concat ", " clientBackendOptions)) (*should be default js in release*)
       |> CLI.(add (long "client-backend"))
       |> to_string from_string_option

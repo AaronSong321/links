@@ -13,7 +13,4 @@ fun count2(n, a) {
 	if (n == 0) a
 	else count2(n-1, a+1)
 }
-alien javascript "/impl.js" printInteger: (Int) ~> ();
-alien javascript "/impl.js" printFloat: (Float) ~> ();
-printFloat(18.0);
-count2(1, 100)
+count2(1, 100000)

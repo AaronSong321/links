@@ -20,14 +20,19 @@ InstantiateWasmFile("../tailcall.wasm", {imports: {
 } }).then(module => {
     const factorial = module.exports.factorial_2236
     const count = module.exports.count_2239
-    count(BigInt(100000000))
-    console.log(1)
+    // factorial(BigInt(100000))
+    const before = performance.now()
+    console.log(module.exports.count2_2244(BigInt(10000000000), BigInt(0)))
+    const time = performance.now() - before
+    console.log(time)
+    // console.log(1)
 })
-InstantiateWasmFile("../notailcall.wasm", {imports: {
 
-} }).then(module => {
-    const factorial = module.exports.factorial_2236
-    const count = module.exports.count_2239
-    count(BigInt(100000000))
-    console.log(1)
-})
+// InstantiateWasmFile("../notailcall.wasm", {imports: {
+
+// } }).then(module => {
+//     const factorial = module.exports.factorial_2236
+//     const count = module.exports.count_2239
+//     count(BigInt(100000000))
+//     console.log(1)
+// })
