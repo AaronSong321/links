@@ -12,22 +12,22 @@ fun addClosure(x) {
 	}
 	addAnInt
 }
-#fun addRecord(b) {
-#	var a = (m=3,n=15);
-#	a.m + b
-#}
-fun addVariant() {
-	#switch (B) {
-	#	case A -> 10
-	#	case B -> 15
-	#}
-	18
+fun addRecord(b) {
+	var a = (m=3,n=15);
+	a.m + b
+}
+fun addVariant(c) {
+	switch (c) {
+		case A(a,b,m) -> 10
+		#case -A as x -> 1
+		case B() -> 8
+	}
 }
 fun test() {
 	#var _ = addAll(1000000);
 	#var add16 = addClosure(8);
 	#var _ = add16(7);
-	#var f2 = addVariant();
+	#var f2 = addVariant(A(8,"mnd",5.5);
 	#var f1 = addRecord(8);
 	()
 }

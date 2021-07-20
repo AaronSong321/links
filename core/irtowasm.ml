@@ -1753,6 +1753,7 @@ module NotWasm = struct
       | Ref of notwasm_type
       | Env
       | InternalRecord of notwasm_type StringMap.t
+      | InternalVariant of string * notwasm_type StringMap.t
     
     type bop =
       | IntAdd
@@ -1778,7 +1779,7 @@ module NotWasm = struct
       | StringLiteral of string_literal
       | NullLiteral
       | BoundIdentifier of identifier
-      | ApplyPrimitive of primitive_function * atom list
+      | ApplyPrimitive of identifier * atom list
       | PointerDereference of notwasm_pointer_type
       | ReadField of atom * string
       | BinaryExpression of atom * bop * atom
@@ -1786,7 +1787,7 @@ module NotWasm = struct
       | BoolLiteral of boolean_literal
       | Cast of atom * notwasm_type
       | EnvGet of int_literal * notwasm_type
-    and primitive_function = identifier
+    (* and primitive_function = identifier *)
     and identifier = string
 
     type expression =
@@ -1834,7 +1835,7 @@ module NotWasm = struct
       mutable w_var_index: int;
       w_variant_name_map: (string, int) Hashtbl.t;
       w_closure_values: (var, identifier) Hashtbl.t;
-      w_primitive_vars: primitive_function Env.Int.t;
+      w_primitive_vars: identifier Env.Int.t;
       w_env_values: (var, int) Hashtbl.t;
       w_closure_capture_field_map: ((var * var), int) Hashtbl.t;
     }
@@ -1913,6 +1914,7 @@ module NotWasm = struct
         Hashtbl.add writer.w_variant_name_map variant_name index;
         index
 
+    let dummy_variant_type = ReferenceType (InternalVariant ("a", StringMap.empty))
     let rec ir_type_to_notwasm ir_type =
       if string_of_datatype ir_type = "()" then InternalUnit
       else
@@ -1941,8 +1943,8 @@ module NotWasm = struct
         | RecursiveApplication _ -> raise (NotImplemented __LOC__)
         | Meta point -> ir_meta_type_to_notwasm point
         | Lolli _ -> raise (NotImplemented __LOC__)
-        | Record row -> ir_record_type_to_notwasm row
-        | Variant _ -> raise (NotImplemented __LOC__)
+        | Record row -> ir_row_type_to_notwasm row
+        | Variant _ -> dummy_variant_type
         | Table _ -> raise (NotImplemented __LOC__)
         | Lens _ -> raise (NotImplemented __LOC__)
         | ForAll (_quantifiers, underlying_type) -> ir_type_to_notwasm underlying_type
@@ -1960,12 +1962,12 @@ module NotWasm = struct
         | End -> raise (NotImplemented __LOC__)
     and ir_meta_type_to_notwasm = fun point ->
       (match Unionfind.find point with
-       | Var _ -> raise (NotImplemented __LOC__)
+       | Var _ -> dummy_variant_type
        | Closed -> raise (NotImplemented __LOC__)
        | Recursive _ -> raise (NotImplemented __LOC__)
        | t -> ir_type_to_notwasm t
       )
-    and ir_record_type_to_notwasm row =
+    and ir_row_type_to_notwasm row =
       match row with
       | Row (field_map, _, _) -> ReferenceType (InternalRecord (StringMap.map (fun ir_type -> ir_field_type_to_notwasm ir_type) field_map))
       | _ -> raise (Unreachable __LOC__)
@@ -2071,6 +2073,7 @@ module NotWasm = struct
     let links_unit_type = links_record_type
     let links_variant_kind_type = ValueType (I32)
     let links_variant_kind_field_name = "_variant_kind"
+    let links_record_field_name int_name = "_record_field_" ^ int_name
 
     let find_func writer var =
       Hashtbl.find writer.w_func_map var
@@ -2099,6 +2102,7 @@ module NotWasm = struct
         ), underlying_type)
         | Env -> SingleAtom NullLiteral
         | InternalRecord _ -> DynObjectLiteral
+        | InternalVariant _ -> DynObjectLiteral
       )
       | InternalUnit -> raise_unit_type ()
 
@@ -2141,7 +2145,9 @@ module NotWasm = struct
         | InternalRecord old_map -> old_map
         | _ -> raise (Unreachable "not record")
       )
-      | _ -> raise (Unreachable "not referencey type")
+      | ValueType _ 
+      | Any -> raise (Unreachable "not reference type")
+      | InternalUnit -> StringMap.empty
     and extend_record_type writer new_fields old_value =
       let old_map: notwasm_type StringMap.t = match old_value with
         | Some value -> type_of_value writer value |> assert_record_field_map
@@ -2169,7 +2175,8 @@ module NotWasm = struct
         type_of_value writer record_value |> assert_record_field_map |> StringMap.find name
       )
       | Erase (delete_fields, old_value) -> erase_record_type writer delete_fields old_value
-      | Inject  _ -> raise (NotImplemented __LOC__)
+      | Inject (variant_name, old_value, _t) -> (* the variant_name provides a more specific type than the type *)
+        ReferenceType (InternalVariant (variant_name, type_of_value writer old_value |> assert_record_field_map))
       | TAbs  _ -> raise (NotImplemented __LOC__)
       (* TApp is probably function value, treat it as is *)
       | TApp (value, tyargs) -> type_of_type_apply writer value tyargs
@@ -2307,6 +2314,13 @@ module NotWasm = struct
       else declare_var_with writer name notwasm_type var_exp
     and conv_var writer name notwasm_type is_global =
       conv_var_with writer name notwasm_type (default_value_expression notwasm_type) is_global
+    and copy_record_fields src dst field_set =
+      let field_set = field_set |> List.map (fun field ->
+          match int_of_string_opt field with
+          | Some _ -> links_record_field_name field
+          | None -> field) 
+      in
+      List.map (fun t -> WriteField (BoundIdentifier dst, t, (ReadField (BoundIdentifier src, t)))) field_set
     and conv_set_value writer func var_name value =
       let set_var exp =
         [UpdateLocalVariable (var_name, exp)]
@@ -2317,12 +2331,13 @@ module NotWasm = struct
       in
       let copy_record writer record_value_option =
         let src_var_name = next_var_name writer in
-        let new_record_stat = VarDeclare (src_var_name, links_record_type, default_value_expression links_record_type) in
-        let fields = match record_value_option with
-          | Some record_value -> field_set_of_record_value writer record_value
-          | None -> []
+        let field_map = match record_value_option with
+          | Some record_value -> type_of_value writer record_value |> assert_record_field_map
+          | None -> StringMap.empty
         in
-        let set_field_stats = List.map (fun t -> WriteField (BoundIdentifier var_name, t, (ReadField (BoundIdentifier src_var_name, t)))) fields in
+        let record_type = ReferenceType (InternalRecord field_map) in
+        let new_record_stat = declare_var src_var_name record_type in
+        let set_field_stats = copy_record_fields src_var_name var_name (StringMapExt.map (fun name _ -> name) field_map) in
         new_record_stat::set_field_stats
       in
       match value with
@@ -2363,8 +2378,8 @@ module NotWasm = struct
           declare_stat::record_stats @ (set_var (SingleAtom atom))
         in
         if is_env_project then compose (EnvGet (closure_capture_field_name writer (match record_value with
-            | Variable v -> v
-            | _ -> assert false) field_name, field_type))
+          | Variable v -> v
+          | _ -> assert false) field_name, field_type))
         else compose (Cast ((ReadField (BoundIdentifier old_record_value_var_name, field_name)), field_type))
       | Erase (field_set, record_value) ->
         let copy_stats =
@@ -2376,7 +2391,10 @@ module NotWasm = struct
           new_record_stat::set_field_stats
         in
         copy_stats
-      | Inject _ -> raise (NotImplemented __LOC__)
+      | Inject (variant_name, value, _t) -> 
+        let copy_stats = copy_record writer (Some value) in
+        let variant_kind_stat = WriteField ((BoundIdentifier var_name), links_variant_kind_field_name, (IntLiteral (variant_kind writer variant_name))) in
+        variant_kind_stat::copy_stats
       | TAbs _ -> raise (NotImplemented __LOC__)
       (* TApp is probably function value, treat it as is *)
       | TApp (value, _tyargs) -> (
@@ -2436,11 +2454,16 @@ module NotWasm = struct
           let case_value_declare_stat = declare_var case_value_temp_var_name predicate_value_type in
           let predicate_stats = conv_var_with_init_value writer case_value_temp_var_name predicate_value_type false value in
           let (variant_kind_temp_var_name, variant_kind_stat) = get_variant_kind writer case_value_temp_var_name in
-          let one_case variant_name (_binder, computation) =
+          let one_case variant_name (binder, computation) =
             let (match_result_var, variant_match_stats) = conv_match_variant writer variant_kind_temp_var_name variant_name in
-            let bind_case_var_stats = [] in
+            let field_map = type_of_binder binder |> ir_type_to_notwasm |> assert_record_field_map
+              |> StringMap.filter (fun field_name _ -> field_name <> links_variant_kind_field_name)
+            in
+            let case_binder_var_name = get_binder_name binder in
+            let bind_stat = declare_var case_binder_var_name (ReferenceType (InternalRecord field_map)) in
+            let bind_case_var_stats = copy_record_fields case_value_temp_var_name case_binder_var_name (field_map |> StringMapExt.map (fun field_name _ -> (links_record_field_name field_name))) in
             let computation_stats = conv_computation computation in
-            (variant_match_stats, match_result_var, bind_case_var_stats @ computation_stats)
+            (variant_match_stats, match_result_var, bind_stat::bind_case_var_stats @ computation_stats)
           in
           let convert_all_cases = StringMapExt.map one_case cases in
           let init_var_stats = [init_var_stat; case_value_declare_stat] @ predicate_stats @ variant_kind_stat @ (List.map (fun (a, _, _) -> a) convert_all_cases |> List.flatten) in
@@ -2643,6 +2666,7 @@ module NotWasm = struct
       | ReferenceType r -> (
         match r with
         | InternalRecord _ -> ReferenceType DynObject
+        | InternalVariant _ -> ReferenceType DynObject
         | _ -> notwasm_type
       )
 
