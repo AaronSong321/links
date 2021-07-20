@@ -1785,7 +1785,7 @@ module NotWasm = struct
       | AnyLiteral of atom
       | BoolLiteral of boolean_literal
       | Cast of atom * notwasm_type
-      | EnvGet of identifier * notwasm_type
+      | EnvGet of int_literal * notwasm_type
     and primitive_function = identifier
     and identifier = string
 
@@ -1836,6 +1836,7 @@ module NotWasm = struct
       w_closure_values: (var, identifier) Hashtbl.t;
       w_primitive_vars: primitive_function Env.Int.t;
       w_env_values: (var, int) Hashtbl.t;
+      w_closure_capture_field_map: ((var * var), int) Hashtbl.t;
     }
     let new_notwasm_writer result wat_output =
       let main_func = {
@@ -1861,6 +1862,7 @@ module NotWasm = struct
         w_closure_values = Hashtbl.create 30;
         w_primitive_vars = Env.String.fold (fun key value acc -> Env.Int.bind value key acc) Lib.nenv Env.Int.empty;
         w_env_values = Hashtbl.create 30;
+        w_closure_capture_field_map = Hashtbl.create 100;
       }
     
     let add_binder writer binder =
@@ -1890,6 +1892,19 @@ module NotWasm = struct
       Hashtbl.mem writer.w_env_values var
     let find_ir_var_type writer v =
       Env.String.find (Env.Int.find v writer.w_primitive_vars) Lib.type_env
+    let add_closure_captured_fields writer binder =
+      let closure_info_var = var_of_binder binder in
+      match type_of_binder binder with
+      | Record row -> (
+        match row with
+        | Row (field_map, _, _) ->
+          StringMapExt.map (fun name _ -> int_of_string name) field_map 
+          |> List.iteri (fun index name -> Hashtbl.add writer.w_closure_capture_field_map (closure_info_var, name) index)
+        | _ -> ()
+      )
+      | _ -> ()
+    let closure_capture_field_name writer closure_info_var name_of_var =
+      Hashtbl.find writer.w_closure_capture_field_map (closure_info_var, int_of_string name_of_var)
 
     let variant_kind writer variant_name =
       match Hashtbl.find_opt writer.w_variant_name_map variant_name with
@@ -2012,6 +2027,7 @@ module NotWasm = struct
           add_binder writer binder; 
           add_closure writer (var_of_binder func.fn_binder);
           add_env writer (var_of_binder binder);
+          add_closure_captured_fields writer binder;
           true
         | None -> false
       in
@@ -2055,7 +2071,6 @@ module NotWasm = struct
     let links_unit_type = links_record_type
     let links_variant_kind_type = ValueType (I32)
     let links_variant_kind_field_name = "_variant_kind"
-    let closure_capture_field_name name = "__notwasm_captured_field_" ^ name
 
     let find_func writer var =
       Hashtbl.find writer.w_func_map var
@@ -2347,7 +2362,9 @@ module NotWasm = struct
         let compose atom = 
           declare_stat::record_stats @ (set_var (SingleAtom atom))
         in
-        if is_env_project then compose (EnvGet (closure_capture_field_name field_name, field_type))
+        if is_env_project then compose (EnvGet (closure_capture_field_name writer (match record_value with
+            | Variable v -> v
+            | _ -> assert false) field_name, field_type))
         else compose (Cast ((ReadField (BoundIdentifier old_record_value_var_name, field_name)), field_type))
       | Erase (field_set, record_value) ->
         let copy_stats =
@@ -2359,8 +2376,8 @@ module NotWasm = struct
           new_record_stat::set_field_stats
         in
         copy_stats
-      | Inject  _ -> raise (NotImplemented __LOC__)
-      | TAbs  _ -> raise (NotImplemented __LOC__)
+      | Inject _ -> raise (NotImplemented __LOC__)
+      | TAbs _ -> raise (NotImplemented __LOC__)
       (* TApp is probably function value, treat it as is *)
       | TApp (value, _tyargs) -> (
         let applied_var_name = next_var_name writer in
@@ -2369,9 +2386,13 @@ module NotWasm = struct
       )
       | XmlNode _ -> raise (NotImplemented __LOC__)
       | Closure (func_var, _ty_var_list, record_value) ->
-        let field_map = 
-          record_value |> type_of_value writer |> assert_record_field_map |>
-          StringMapExt.map (fun name t -> ((closure_capture_field_name name), t))
+        let field_map =
+          match record_value with
+          | Extend (field_map, _) -> StringMapExt.map (fun name_of_captured_var _ ->
+              let var = int_of_string name_of_captured_var in
+              (get_var_name writer var, type_of_var writer var)
+            ) field_map
+          | _ -> raise (Unreachable __LOC__)
         in
         set_var (ClosureLiteral (get_var_name writer func_var, field_map))
       | Coerce (value, ir_type) ->
@@ -2467,15 +2488,6 @@ module NotWasm = struct
       in
       let stats = binding_stats @ tail_stats @ [Return (BoundIdentifier tail_temp_var_name)] in
       notwasm_func.func_body <- stats
-    (* and tail_computation_is_single_atom tail_computation =
-      match tail_computation with
-      | Ir.Return value -> (
-        match value with
-        | Constant _ -> true
-        | Variable _ -> true
-        | _ -> false
-      )
-      | _ -> false *)
     and conv_arg writer func value =
       let arg_var_name = next_var_name writer in
       let arg_stats = conv_set_value writer func arg_var_name value in
@@ -2491,10 +2503,6 @@ module NotWasm = struct
       | Int value -> IntLiteral value
       | Float value -> FloatLiteral value
       | String value -> StringLiteral value
-    (* and conv_read_var writer var =
-      BoundIdentifier (get_var_name writer var) *)
-    (* and conv_func_value writer var =
-      conv_read_var var *)
     and conv_apply writer func f args =
       conv_apply_pure writer func f args
     and conv_apply_pure writer func f args =
@@ -2737,7 +2745,7 @@ module NotWasm = struct
       | AnyLiteral atom -> Seq ([L "any("] @ [write_atom atom] @ [L ")"])
       | BoolLiteral v -> L (string_of_bool v)
       | Cast (atom, t) -> Seq ([write_atom atom] @ [L " as "] @ [write_notwasm_type t])
-      | EnvGet (field, t) -> Seq ([L "env."; L field; L ": "] @ [write_notwasm_type t])
+      | EnvGet (field, t) -> Seq ([L "env."; L (string_of_int field); L ": "] @ [write_notwasm_type t])
     and write_atoms atoms =
       List.map write_atom atoms |> ListExt.concat_with (L ", ")
     and write_names names =
