@@ -1,0 +1,34 @@
+fun addAll(n) {
+	fun alt(n, acc) {
+		if (n == 0) acc
+		else alt(n-1, acc*n)
+	}
+	alt(n, 1)
+}
+fun addClosure(x) {
+	var y = x + x;
+	fun addAnInt(t) {
+		t+y
+	}
+	addAnInt
+}
+#fun addRecord(b) {
+#	var a = (m=3,n=15);
+#	a.m + b
+#}
+fun addVariant() {
+	#switch (B) {
+	#	case A -> 10
+	#	case B -> 15
+	#}
+	18
+}
+fun test() {
+	#var _ = addAll(1000000);
+	#var add16 = addClosure(8);
+	#var _ = add16(7);
+	#var f2 = addVariant();
+	#var f1 = addRecord(8);
+	()
+}
+test()

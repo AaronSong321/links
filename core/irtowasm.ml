@@ -6,7 +6,7 @@ open Types
 open CommonTypes
 open Utility
 
-exception Not_implemented of string
+exception NotImplemented of string
 exception Unreachable of string
 
 module ListExt = struct
@@ -31,6 +31,11 @@ module ListExt = struct
     | elem::v -> 
       if filter elem then skip_while filter v 
       else container
+  let concat_with elem container =
+    let g = List.map (fun t -> [elem; t]) container |> List.flatten in
+    match g with
+    | [] -> []
+    | _::v -> v
 end
 module SysExt = struct
   let get_filename_without_extension file =
@@ -116,9 +121,9 @@ let non_null_list t =
   let rec g f acc =
     match f with
     | v::t -> (match v with 
-      | Some k -> g t (acc @ [k])
-      | None -> g t acc
-    )
+        | Some k -> g t (acc @ [k])
+        | None -> g t acc
+      )
     | _ -> acc
   in
   g t []
@@ -182,7 +187,7 @@ module Wasm = struct
     let wasm_func_pointer_type = Number_type(NInt, L32)
     let rec to_string: wasm_type -> string = function
       | Val_type v -> to_string_val_type v
-      | _ -> raise (Not_implemented __LOC__)
+      | _ -> raise (NotImplemented __LOC__)
     and to_string_val_type: val_type -> string = function
       | Number_type (a,b) -> (
         match a with
@@ -386,15 +391,15 @@ module Wasm = struct
       let init_value_insc =
         match v with
         | Number_type (iof, length) -> Numeric_insc (
-          match iof with
-          | NInt -> NInsc_consti (length, 0)
-          | NFloat -> NInsc_constf (length, 0.0)
-        )
+            match iof with
+            | NInt -> NInsc_consti (length, 0)
+            | NFloat -> NInsc_constf (length, 0.0)
+          )
         | Ref_type h -> (
-          match h with
-          | Func_ref -> Ref_insc (RInsc_null Func_heap_ref)
-          | Extern_ref _ -> Ref_insc (RInsc_null Extern_heap_ref)
-        )
+            match h with
+            | Func_ref -> Ref_insc (RInsc_null Func_heap_ref)
+            | Extern_ref _ -> Ref_insc (RInsc_null Extern_heap_ref)
+          )
       in
       let global_value_type = {
         global_var_type = v;
@@ -420,7 +425,6 @@ module Wasm = struct
   end
   
   module BinderMap = Utility.IntMap
-  type var_binder_map = Ir.binder BinderMap.t
 
   module Pretty_printing = struct
     open Grammar
@@ -444,7 +448,7 @@ module Wasm = struct
 
     type printer = {
       mutable indent: int;
-      indent_wSNum: int;
+      indent_ws_num: int;
       plain_insc_style: instruction_print_style;
       ctrl_insc_style: instruction_print_style;
       mutable argument_print: argument_print_style;
@@ -452,7 +456,7 @@ module Wasm = struct
     }
     let default_printer () = { 
       indent = 0; 
-      indent_wSNum = 2; 
+      indent_ws_num = 2; 
       plain_insc_style = Plain_style;
       ctrl_insc_style = Plain_style;
       argument_print = Stack_style;
@@ -460,7 +464,7 @@ module Wasm = struct
     }
     let reverse_style_printer () = {
       indent = 0;
-      indent_wSNum = 2;
+      indent_ws_num = 2;
       plain_insc_style = Folded_style;
       ctrl_insc_style = Folded_style;
       argument_print = Arg_style;
@@ -482,7 +486,7 @@ module Wasm = struct
       | Number_type (_, b) -> b
       | Ref_type _ -> length_of_val_type wasm_func_pointer_type
 
-    let ir_primitive_type2Wasm: CommonTypes.Primitive.t -> val_type = fun p ->
+    let ir_primitive_type_to_wasm: CommonTypes.Primitive.t -> val_type = fun p ->
       let open CommonTypes.Primitive in
       match p with
       | Bool   
@@ -491,17 +495,17 @@ module Wasm = struct
       | Float   -> links_float_value_type
       | XmlItem 
       | DB      
-      | String  -> raise (Not_implemented __LOC__)
+      | String  -> raise (NotImplemented __LOC__)
     let to_val_type t =
       match t with
       | Val_type v -> v 
-      | Heap_type _ -> raise (Not_implemented __LOC__)
+      | Heap_type _ -> raise (NotImplemented __LOC__)
       | Func_type _ -> wasm_func_pointer_type
-      | Memory_type _ -> raise (Not_implemented __LOC__)
-      | Table_type _ -> raise (Not_implemented __LOC__)
-      | Global_type _ -> raise (Not_implemented __LOC__)
-      | Error_type -> raise (Not_implemented __LOC__)
-      | Unit_type -> raise (Not_implemented __LOC__)
+      | Memory_type _ -> raise (NotImplemented __LOC__)
+      | Table_type _ -> raise (NotImplemented __LOC__)
+      | Global_type _ -> raise (NotImplemented __LOC__)
+      | Error_type -> raise (NotImplemented __LOC__)
+      | Unit_type -> raise (NotImplemented __LOC__)
 
     module PPInstruction = struct
       let prepend_dollar p = "$" ^ p
@@ -553,7 +557,7 @@ module Wasm = struct
     end
 
     let give_indent_string pt = 
-      String.make (pt.indent * pt.indent_wSNum) ' '
+      String.make (pt.indent * pt.indent_ws_num) ' '
     let increment_indent pt = 
       pt.indent <- pt.indent + 1
     let decrement_indent pt =
@@ -592,8 +596,8 @@ module Wasm = struct
       type t = Ir.binder
       let compare (a: binder) (b: binder) =
         (var_of_binder a) - (var_of_binder b)
-      let show _ = raise (Not_implemented __LOC__)
-      let pp _ _ = raise (Not_implemented __LOC__)
+      let show _ = raise (NotImplemented __LOC__)
+      let pp _ _ = raise (NotImplemented __LOC__)
     end
     module type BINDERSET = Set with type elt = binder
     module BinderSet : BINDERSET = Set.Make(OrderedBinder)
@@ -614,7 +618,7 @@ module Wasm = struct
       use_cps: bool;
       mutable func_map: (func_def * Ir.fun_def) list;
       mutable func_map2: (binder, func_def) Hashtbl.t;
-      mutable var_map: var_binder_map;
+      mutable var_map: Ir.binder BinderMap.t;
       mutable func_var: BinderSet.t;
       mutable unit_var: BinderSet.t;
       mutable import_jslib_func: IntSet.t;
@@ -675,10 +679,10 @@ module Wasm = struct
     let rec ir_type2Wasm: Types.datatype -> wasm_type = fun ir_type ->
       let ir_meta_type2Wasm = fun point ->
         (match Unionfind.find point with
-         | Var _ -> raise (Not_implemented __LOC__)
-         | Closed -> raise (Not_implemented __LOC__)
-         | Recursive _ -> raise (Not_implemented __LOC__)
-         | t -> ir_type2Wasm t
+          | Var _ -> raise (NotImplemented __LOC__)
+          | Closed -> raise (NotImplemented __LOC__)
+          | Recursive _ -> raise (NotImplemented __LOC__)
+          | t -> ir_type2Wasm t
         ) in
       let ir_record_type2Wasm row = ir_type2Wasm row in
       let rec ir_type_to_wasm_private ir_type =
@@ -690,31 +694,31 @@ module Wasm = struct
         let (field_map, _, _) = r in
         let types = StringMapExt.map (fun field_name field_type -> Some field_name, field_type |> ir_type_to_wasm_private) field_map in
         let types1 = match types with
-        | [t] -> (
-          match t with
-          | (_, Unit_type) -> []
-          | _ -> [t]
-        )
-        | _ -> types
+          | [t] -> (
+              match t with
+              | (_, Unit_type) -> []
+              | _ -> [t]
+            )
+          | _ -> types
         in
         List.map (fun (a, b) -> (a, to_val_type b)) types1
       in
       let rec extract_from_in_type = function
         | Row r -> extract_from_row r 
         | Record r -> extract_from_in_type r 
-        | _ -> raise (Not_implemented __LOC__)
+        | _ -> raise (NotImplemented __LOC__)
       in
       let rec get_result (f: typ) =
         match f with
         | Function (_, _, out_type) -> get_result out_type
-        | Primitive p -> Some (ir_primitive_type2Wasm p)
-        | Lolli _ -> raise (Not_implemented __LOC__)
+        | Primitive p -> Some (ir_primitive_type_to_wasm p)
+        | Lolli _ -> raise (NotImplemented __LOC__)
         | Record _ -> None
-        | Variant _ -> raise (Not_implemented __LOC__)
-        | Table _ -> raise (Not_implemented __LOC__)
-        | Lens _ -> raise (Not_implemented __LOC__)
+        | Variant _ -> raise (NotImplemented __LOC__)
+        | Table _ -> raise (NotImplemented __LOC__)
+        | Lens _ -> raise (NotImplemented __LOC__)
         | ForAll (_quantifiers, underlying_type) -> get_result underlying_type
-        | _ -> raise (Not_implemented __LOC__)
+        | _ -> raise (NotImplemented __LOC__)
       in
       let get_ir_func_params in_type =
         extract_from_in_type in_type
@@ -722,72 +726,72 @@ module Wasm = struct
 
       if string_of_datatype ir_type = "()" then Unit_type
       else
-      match ir_type with
-      | Primitive p -> Val_type (ir_primitive_type2Wasm p)
-      | Function (in_type, _, _) ->
-        let result_type = get_result ir_type in
-        let result_type = match result_type with
-          | None -> []
-          | Some a -> [a]
-        in
-        Func_type {
-          p = get_ir_func_params in_type; r = result_type
-        }
-      | Effect _ -> raise (Not_implemented __LOC__)
-      | Var _ -> raise (Not_implemented __LOC__)
-      | Recursive _ -> raise (Not_implemented __LOC__)
-      | Not_typed -> raise (Not_implemented __LOC__)
-      | Alias _ -> raise (Not_implemented __LOC__)
-      | Application _ -> raise (Not_implemented __LOC__)
-      | RecursiveApplication _ -> raise (Not_implemented __LOC__)
-      | Meta point -> ir_meta_type2Wasm point
-      | Lolli _ -> raise (Not_implemented __LOC__)
-      | Record row -> ir_record_type2Wasm row
-      | Variant _ -> raise (Not_implemented __LOC__)
-      | Table _ -> raise (Not_implemented __LOC__)
-      | Lens _ -> raise (Not_implemented __LOC__)
-      | ForAll (_quantifiers, underlying_type) -> ir_type2Wasm underlying_type
-      | Row _ -> raise (Not_implemented (string_of_datatype ir_type))
-      | Closed -> raise (Not_implemented __LOC__)
+        match ir_type with
+        | Primitive p -> Val_type (ir_primitive_type_to_wasm p)
+        | Function (in_type, _, _) ->
+            let result_type = get_result ir_type in
+            let result_type = match result_type with
+              | None -> []
+              | Some a -> [a]
+            in
+            Func_type {
+              p = get_ir_func_params in_type; r = result_type
+            }
+        | Effect _ -> raise (NotImplemented __LOC__)
+        | Var _ -> raise (NotImplemented __LOC__)
+        | Recursive _ -> raise (NotImplemented __LOC__)
+        | Not_typed -> raise (NotImplemented __LOC__)
+        | Alias _ -> raise (NotImplemented __LOC__)
+        | Application _ -> raise (NotImplemented __LOC__)
+        | RecursiveApplication _ -> raise (NotImplemented __LOC__)
+        | Meta point -> ir_meta_type2Wasm point
+        | Lolli _ -> raise (NotImplemented __LOC__)
+        | Record row -> ir_record_type2Wasm row
+        | Variant _ -> raise (NotImplemented __LOC__)
+        | Table _ -> raise (NotImplemented __LOC__)
+        | Lens _ -> raise (NotImplemented __LOC__)
+        | ForAll (_quantifiers, underlying_type) -> ir_type2Wasm underlying_type
+        | Row _ -> raise (NotImplemented (string_of_datatype ir_type))
+        | Closed -> raise (NotImplemented __LOC__)
       (* Presence *)
-      | Absent -> raise (Not_implemented __LOC__)
-      | Present a -> raise (Not_implemented (string_of_datatype a))
+        | Absent -> raise (NotImplemented __LOC__)
+        | Present a -> raise (NotImplemented (string_of_datatype a))
       (* Session *)
-      | Input _ -> raise (Not_implemented __LOC__)
-      | Output _ -> raise (Not_implemented __LOC__)
-      | Select _ -> raise (Not_implemented __LOC__)
-      | Choice _ -> raise (Not_implemented __LOC__)
-      | Dual _ -> raise (Not_implemented __LOC__)
-      | End -> raise (Not_implemented __LOC__)
+        | Input _ -> raise (NotImplemented __LOC__)
+        | Output _ -> raise (NotImplemented __LOC__)
+        | Select _ -> raise (NotImplemented __LOC__)
+        | Choice _ -> raise (NotImplemented __LOC__)
+        | Dual _ -> raise (NotImplemented __LOC__)
+        | End -> raise (NotImplemented __LOC__)
     let rec get_result_type = function
       | Function (_, _, result_type) -> ir_type2Wasm result_type 
-      | Primitive _ -> raise (Not_implemented __LOC__)
-      | Effect _ -> raise (Not_implemented __LOC__)
-      | Var _ -> raise (Not_implemented __LOC__)
-      | Recursive _ -> raise (Not_implemented __LOC__)
-      | Not_typed -> raise (Not_implemented __LOC__)
-      | Alias _ -> raise (Not_implemented __LOC__)
-      | Application _ -> raise (Not_implemented __LOC__)
-      | RecursiveApplication _ -> raise (Not_implemented __LOC__)
-      | Meta _ -> raise (Not_implemented __LOC__)
-      | Lolli _ -> raise (Not_implemented __LOC__)
-      | Record _ -> raise (Not_implemented __LOC__)
-      | Variant _ -> raise (Not_implemented __LOC__)
-      | Table _ -> raise (Not_implemented __LOC__)
-      | Lens _ -> raise (Not_implemented __LOC__)
+      | Primitive _ -> raise (NotImplemented __LOC__)
+      | Effect _ -> raise (NotImplemented __LOC__)
+      | Var _ -> raise (NotImplemented __LOC__)
+      | Recursive _ -> raise (NotImplemented __LOC__)
+      | Not_typed -> raise (NotImplemented __LOC__)
+      | Alias _ -> raise (NotImplemented __LOC__)
+      | Application _ -> raise (NotImplemented __LOC__)
+      | RecursiveApplication _ -> raise (NotImplemented __LOC__)
+      | Meta _ -> raise (NotImplemented __LOC__)
+      | Lolli _ -> raise (NotImplemented __LOC__)
+      | Record _ -> raise (NotImplemented __LOC__)
+      | Variant _ -> raise (NotImplemented __LOC__)
+      | Table _ -> raise (NotImplemented __LOC__)
+      | Lens _ -> raise (NotImplemented __LOC__)
       | ForAll (_quantifiers, underlying_type) -> get_result_type underlying_type
-      | Row _ -> raise (Not_implemented __LOC__)
-      | Closed -> raise (Not_implemented __LOC__)
+      | Row _ -> raise (NotImplemented __LOC__)
+      | Closed -> raise (NotImplemented __LOC__)
       (* Presence *)
-      | Absent -> raise (Not_implemented __LOC__)
-      | Present _ -> raise (Not_implemented __LOC__)
+      | Absent -> raise (NotImplemented __LOC__)
+      | Present _ -> raise (NotImplemented __LOC__)
       (* Session *)
-      | Input _ -> raise (Not_implemented __LOC__)
-      | Output _ -> raise (Not_implemented __LOC__)
-      | Select _ -> raise (Not_implemented __LOC__)
-      | Choice _ -> raise (Not_implemented __LOC__)
-      | Dual _ -> raise (Not_implemented __LOC__)
-      | End -> raise (Not_implemented __LOC__)
+      | Input _ -> raise (NotImplemented __LOC__)
+      | Output _ -> raise (NotImplemented __LOC__)
+      | Select _ -> raise (NotImplemented __LOC__)
+      | Choice _ -> raise (NotImplemented __LOC__)
+      | Dual _ -> raise (NotImplemented __LOC__)
+      | End -> raise (NotImplemented __LOC__)
     let ir_func2wasm: module_def -> Ir.fun_def -> func_def = fun wasm_module ir_func ->
       let function_binder = ir_func.fn_binder in
       let params = 
@@ -854,13 +858,13 @@ module Wasm = struct
         get_result_type ret_type1
       | Extend _ -> 
         if ir_value_is_unit applied_value then links_unit_type 
-        else raise (Not_implemented __LOC__)
+        else raise (NotImplemented __LOC__)
       | ApplyPure (applied_value, args) -> (
         match applied_value with
         | TApp (applied_value1, _) -> type_of_apply writer applied_value1 args
-        | _ -> raise (Not_implemented __LOC__)
+        | _ -> raise (NotImplemented __LOC__)
       )
-      | _ -> raise (Not_implemented __LOC__)
+      | _ -> raise (NotImplemented __LOC__)
     and type_of_value writer value =
       let type_of_primitive_value var = find_ir_var_type var |> ir_type2Wasm in
       let open Constant in
@@ -869,26 +873,26 @@ module Wasm = struct
         | Bool _
         | Int _
         | Char _ -> links_int_type
-        | String _ -> raise (Not_implemented __LOC__)
+        | String _ -> raise (NotImplemented __LOC__)
         | Float _ -> links_float_type
       )
       | Variable v -> 
         if is_primitive_var v then type_of_primitive_value v
-        else find_binder writer v |> (fun t -> match t with|Some s->s|None->raise (Not_implemented (__LOC__ ^ " ... " ^ (string_of_int v)))) |> type_of_binder |> ir_type2Wasm
-      | Extend _ -> if ir_value_is_unit value then links_unit_type else raise (Not_implemented __LOC__)
-      | Project _ -> raise (Not_implemented __LOC__)
-      | Erase _ -> raise (Not_implemented __LOC__)
-      | Inject _ -> raise (Not_implemented __LOC__)
-      | TAbs _ -> raise (Not_implemented __LOC__)
-      | TApp _ -> raise (Not_implemented __LOC__)
-      | XmlNode _ -> raise (Not_implemented __LOC__)
+        else find_binder writer v |> (fun t -> match t with|Some s->s|None->raise (NotImplemented (__LOC__ ^ " ... " ^ (string_of_int v)))) |> type_of_binder |> ir_type2Wasm
+      | Extend _ -> if ir_value_is_unit value then links_unit_type else raise (NotImplemented __LOC__)
+      | Project _ -> raise (NotImplemented __LOC__)
+      | Erase _ -> raise (NotImplemented __LOC__)
+      | Inject _ -> raise (NotImplemented __LOC__)
+      | TAbs _ -> raise (NotImplemented __LOC__)
+      | TApp _ -> raise (NotImplemented __LOC__)
+      | XmlNode _ -> raise (NotImplemented __LOC__)
       | ApplyPure (applied_value, args) -> (
-        match applied_value with
-        | TApp (applied_value1, _) -> type_of_apply writer applied_value1 args
-        | _ -> raise (Not_implemented __LOC__)
-      )
-      | Closure _ -> raise (Not_implemented __LOC__)
-      | Coerce _ -> raise (Not_implemented __LOC__)
+          match applied_value with
+          | TApp (applied_value1, _) -> type_of_apply writer applied_value1 args
+          | _ -> raise (NotImplemented __LOC__)
+        )
+      | Closure _ -> raise (NotImplemented __LOC__)
+      | Coerce _ -> raise (NotImplemented __LOC__)
 
     (* let is_constant0 (v: Ir.value) =
       match v with
@@ -987,11 +991,11 @@ module Wasm = struct
     end
 
     let rec collect_program writer program =
-      let (bindings, _) = program in
+      let (bindings, tail_computation) = program in
       let main_func = declare_fun writer.wasm_module (Some links_main_func_name) [] [] (Some links_main_func_name) in
+      collect_tail_computation writer main_func tail_computation;
       bindings |> List.iter (collect_binding writer main_func);
-      (* main func must have type [] -> [] *)
-      writer.wasm_module.st <- Some (Mni_name (name_of_func main_func));
+      writer.wasm_module.st <- Some (Mni_name (name_of_func main_func))
     and collect_binding writer func binding =
       let collect_alien_var writer binder module_name = 
         add_binder writer binder;
@@ -1017,7 +1021,7 @@ module Wasm = struct
         | Val_type _ -> collect_alien_var writer binder alien_info.object_name
         | _ -> assert false
       )
-      | Module _ -> raise (Not_implemented __LOC__)
+      | Module _ -> raise (NotImplemented __LOC__)
     and collect_let_binding writer func binder _tylist tail_computation = 
       collect_tail_computation writer func tail_computation;
       let local_name = get_binder_name binder in
@@ -1040,11 +1044,12 @@ module Wasm = struct
       match local_type with
       | Val_type v -> collect_value_let_binding v 
       | Func_type f -> collect_fp_let_binding f
-      | Memory_type _ -> raise (Not_implemented __LOC__)
-      | Table_type _ -> raise (Not_implemented __LOC__)
-      | Global_type _ -> raise (Not_implemented __LOC__)
-      | Error_type _ -> raise (Not_implemented __LOC__)
-      | Unit_type _ -> collect_unit_let_binding ()
+      | Memory_type _ -> raise (NotImplemented __LOC__)
+      | Table_type _ -> raise (NotImplemented __LOC__)
+      | Global_type _ -> raise (NotImplemented __LOC__)
+      | Error_type -> raise (NotImplemented __LOC__)
+      | Heap_type _ -> raise (NotImplemented __LOC__)
+      | Unit_type -> collect_unit_let_binding ()
     and collect_ir_fun writer (ir_func: Ir.fun_def) =
       let wasm_func = ir_func2wasm writer.wasm_module ir_func in
       ir_func.fn_params |> List.iter (fun t -> add_binder writer t);
@@ -1059,7 +1064,7 @@ module Wasm = struct
     and collect_tail_computation writer func tail = 
       match tail with
       | If (_, a, b) -> collect_computation writer func a; collect_computation writer func b
-      | Case _ -> raise (Not_implemented __LOC__)
+      | Case _ -> raise (NotImplemented __LOC__)
       | _ -> ()
     
 
@@ -1073,10 +1078,10 @@ module Wasm = struct
       match comp with
       | Return v -> type_of_value writer v
       | Apply (func, value) -> (
-        match func with
-        | TApp (func_value, _) -> type_of_apply writer func_value value
-        | _ -> raise (Not_implemented __LOC__)
-      )
+          match func with
+          | TApp (func_value, _) -> type_of_apply writer func_value value
+          | _ -> raise (NotImplemented __LOC__)
+        )
       | Special _ -> links_int_type
       | Case _ -> links_int_type
       | If (_, if_tail, else_tail) -> 
@@ -1085,15 +1090,15 @@ module Wasm = struct
       let types = List.map (fun t -> let (_, tail) = t in type_of_tail_computation writer tail) comps in
       let hd = List.hd types in
       if List.for_all (fun t -> t = hd) types then hd
-      else raise (Not_implemented __LOC__)
+      else raise (NotImplemented __LOC__)
     and conv_tail_computation writer func tail_computation =
       match tail_computation with
       | Return v -> 
         if ir_value_is_unit v then Control_insc CInsc_nop
         else conv_value writer func v
       | Apply (f, args) -> conv_apply writer func f args
-      | Special _ -> raise (Not_implemented __LOC__)
-      | Case _ -> raise (Not_implemented __LOC__)
+      | Special _ -> raise (NotImplemented __LOC__)
+      | Case _ -> raise (NotImplemented __LOC__)
       | If (value, if_comp, else_comp) -> conv_if writer func value if_comp else_comp
     and conv_if writer func value if_comp else_comp =
       let value1 = conv_value writer func value in
@@ -1132,29 +1137,32 @@ module Wasm = struct
       | Fun fun_def -> process_func fun_def; None
       | Rec fun_defs -> List.iter process_func fun_defs; None
       | Alien _ -> None
-      | Module _ -> raise (Not_implemented __LOC__)
+      | Module _ -> raise (NotImplemented __LOC__)
     and conv_func writer func ir_func =
       func.body <- conv_computation writer func ir_func.fn_body
     and conv_read_var binder =
       let var_index = Mni_name (get_binder_name binder) in
+      let open Var.Scope in
       let insc = match scope_of_binder binder with
         | Local -> VInsc_lget var_index
         | Global -> VInsc_gget var_index
       in Var_insc insc
     and conv_write_var binder comp_insc =
       let var_index = Mni_name (get_binder_name binder) in
+      let open Var.Scope in
       let insc = match scope_of_binder binder with
         | Local -> VInsc_lset (var_index, comp_insc)
         | Global -> VInsc_gset (var_index, comp_insc)
       in Var_insc insc
     and conv_value writer func ir_value =
       let conv_const (const_value: Constant.t) =
+        let open CommonTypes.Constant in
         let insc = match const_value with
           | Bool value -> NInsc_consti (length_of_val_type links_int_value_type, if value then 1 else 0)
           | Char value -> NInsc_consti (length_of_val_type links_int_value_type, int_of_char value)
           | Int value -> NInsc_consti (length_of_val_type links_int_value_type, value)
           | Float value -> NInsc_constf (length_of_val_type links_float_value_type, value)
-          | _ -> raise (Not_implemented __LOC__)
+          | _ -> raise (NotImplemented __LOC__)
         in
         Numeric_insc insc
       in
@@ -1166,42 +1174,42 @@ module Wasm = struct
       match ir_value with
       | Constant c -> conv_const c
       | Variable v -> 
-        conv_read_var (find_binder writer v |> (fun t -> match t with | Some t -> t | None -> raise (Not_implemented (string_of_int v))))
+        conv_read_var (find_binder writer v |> (fun t -> match t with | Some t -> t | None -> raise (NotImplemented (string_of_int v))))
       | ApplyPure (f, args) -> conv_apply_pure writer func f args
-      | Project  _ -> raise (Not_implemented __LOC__)
-      | Extend _ -> raise (Not_implemented __LOC__)
-      | Erase  _ -> raise (Not_implemented __LOC__)
-      | Inject  _ -> raise (Not_implemented __LOC__)
-      | TAbs  _ -> raise (Not_implemented __LOC__)
+      | Project  _ -> raise (NotImplemented __LOC__)
+      | Extend _ -> raise (NotImplemented __LOC__)
+      | Erase  _ -> raise (NotImplemented __LOC__)
+      | Inject  _ -> raise (NotImplemented __LOC__)
+      | TAbs  _ -> raise (NotImplemented __LOC__)
       (* TApp is probably function value, treat it as is *)
       | TApp (var, _tyargs) -> (
-        match var with
-        | Variable v -> conv_func_value v
-        | _ -> raise (Not_implemented __LOC__)
-      )
-      | XmlNode _ -> raise (Not_implemented __LOC__)
-      | Closure _ -> raise (Not_implemented __LOC__)
-      | Coerce _ -> raise (Not_implemented __LOC__)
+          match var with
+          | Variable v -> conv_func_value v
+          | _ -> raise (NotImplemented __LOC__)
+        )
+      | XmlNode _ -> raise (NotImplemented __LOC__)
+      | Closure _ -> raise (NotImplemented __LOC__)
+      | Coerce _ -> raise (NotImplemented __LOC__)
     and conv_apply_pure writer func value args =
       match value with
       | TApp (applied_value, _) -> (
-        let call_insc = match applied_value with
-        | Variable v -> conv_ir_func_call writer func v args
-        | _ -> raise (Not_implemented __LOC__)
-        in
-        if can_use_tail_call writer value then (
-          match call_insc with
-          | Control_insc c -> (
-            match c with
-            | CInsc_call (a, b) -> Control_insc (CInsc_return_call (a, b))
-            | CInsc_call_indirect (a, b, c, d) -> Control_insc (CInsc_return_call_indirect (a, b, c, d))
+          let call_insc = match applied_value with
+            | Variable v -> conv_ir_func_call writer func v args
+            | _ -> raise (NotImplemented __LOC__)
+          in
+          if can_use_tail_call writer value then (
+            match call_insc with
+            | Control_insc c -> (
+                match c with
+                | CInsc_call (a, b) -> Control_insc (CInsc_return_call (a, b))
+                | CInsc_call_indirect (a, b, c, d) -> Control_insc (CInsc_return_call_indirect (a, b, c, d))
+                | _ -> call_insc
+              )
             | _ -> call_insc
           )
-          | _ -> call_insc
+          else call_insc
         )
-        else call_insc
-      )
-      | _ -> raise (Not_implemented __LOC__)
+      | _ -> raise (NotImplemented __LOC__)
     and conv_apply writer func value args = conv_apply_pure writer func value args 
     and conv_primitive_ir_func_call writer func v operands =
       let operator_types = operands |> List.map (fun t -> type_of_value writer t |> to_val_type) in
@@ -1263,7 +1271,7 @@ module Wasm = struct
         | "float_to_int" -> Numeric_insc (NInsc_trunc_sat (non_null op1_type, links_int_value_type |> length_of_val_type, Signed, non_null op1))
         | "abs" -> Numeric_insc (NInsc_funop_abs (non_null op1_type, non_null op1))
         | "maximum" -> Numeric_insc (NInsc_fbinop_max (non_null op1_type, non_null op1, non_null op2))
-        | _ -> if IntSet.exists (fun t -> t = v) writer.import_jslib_func then () else import_jslib_func v;
+        | _ -> if IntSet.mem v writer.import_jslib_func then () else import_jslib_func v;
           use_jslib_func v
       in
       insc
@@ -1277,7 +1285,7 @@ module Wasm = struct
       let func_type = binder |> type_of_binder |> ir_type2Wasm in
       let type_use = match func_type with
         | Func_type t -> TU_def t
-        | _ -> raise (Not_implemented __LOC__)
+        | _ -> raise (Unreachable __LOC__)
       in
       let insc = CInsc_call_indirect (Mni_name (binder |> get_binder_name), Scope.is_local (scope_of_binder binder), type_use, (operands |> List.map (conv_value writer func))) in
       Control_insc insc
@@ -1291,10 +1299,10 @@ module Wasm = struct
       let (bindings, tail) = comp in
       let not_nop = function
         | Control_insc c -> (
-          match c with
-          | CInsc_nop -> false
-          | _ -> true
-        )
+            match c with
+            | CInsc_nop -> false
+            | _ -> true
+          )
         | _ -> true
       in
       let b1 = bindings |> List.map (conv_binding writer func) |> non_null_list |> List.filter not_nop in
@@ -1384,8 +1392,8 @@ module Wasm = struct
       let (table_type, export_anno) = tb in
       table_type.table_type_limit.min <- func_num;
       (match table_type.table_type_limit.max with
-      | Some _ -> table_type.table_type_limit.max <- Some func_num
-      | None -> ());
+       | Some _ -> table_type.table_type_limit.max <- Some func_num
+       | None -> ());
       Paren ([Literal "table"] @ (write_export_annotation export_anno) @ [IdSep] @ (write_limit table_type.table_type_limit) @ [IdSep; Literal "funcref"])
     and write_element writer =
       let elems = IntMapExt.map (fun var _ -> [IdSep; Literal (var |> find_binder writer |> non_null |> get_function_binder_name)]) writer.wasm_module.fp_dic |> List.flatten in
@@ -1408,8 +1416,8 @@ module Wasm = struct
         List.map write_local locals |> flatten_params 
       in
       let local_nodes = match write_locals func.locals with
-      | [] -> [] 
-      | a -> a @ [LineIndent] in
+        | [] -> [] 
+        | a -> a @ [LineIndent] in
       let insc_nodes = func.body |> List.map (write_instruction writer.printer) |> List.flatten |> ListExt.skip_while (function | LineIndent -> true | _ -> false) in
       let nodes = [Literal "func"] @ name_nodes @ (write_export_annotation func.func_export_anno) @ func_type_nodes @ [IncWithLineIndent] @ local_nodes @ insc_nodes @ [DecWithLineIndent] in
       Paren nodes
@@ -1439,6 +1447,7 @@ module Wasm = struct
         | Ref_insc c -> write_ref_insc printer c 
         | Var_insc c -> write_var_insc printer c
         | Param_insc c -> write_param_insc printer c
+        | _ -> raise (Unreachable __LOC__)
       in 
       node
     and write_insc_name_with_number insc number =
@@ -1453,10 +1462,10 @@ module Wasm = struct
         let name =
           match iof with
           | NInt -> (
-            match name with
-            | "eq" | "ne" -> name
-            | _ -> name ^ "_s"
-          )
+              match name with
+              | "eq" | "ne" -> name
+              | _ -> name ^ "_s"
+            )
           | NFloat -> name
         in
         let left_nodes = write_instruction printer left in
@@ -1576,7 +1585,6 @@ module Wasm = struct
       | CInsc_call_indirect (local_index, var_is_local, type_use, args) -> write_call_indirect printer local_index var_is_local type_use args "call_indirect"
       | CInsc_return_call_indirect (local_index, var_is_local, type_use, args) -> write_call_indirect printer local_index var_is_local type_use args "return_call_indirect"
       | CInsc_unreachable -> [LineIndent; Literal "unreachable"]
-      | CInsc_nop -> [LineIndent; Literal "nop"]
       | CInsc_return_call (func_index, args) -> write_call "return_call" func_index args
       | _ -> assert false
     and write_call_indirect printer local_index var_is_local type_use args insc_name =
@@ -1720,6 +1728,1052 @@ InstantiateWasmFile(|efgh}
   end
 end
 
+module NotWasm = struct 
+  module Grammar = struct
+    type notwasm_type = 
+      | Any
+      | ValueType of notwasm_value_type
+      | ReferenceType of notwasm_pointer_type
+      | InternalUnit
+    and notwasm_param_list_type = notwasm_type list
+    and return_type = 
+      | ReturnT of notwasm_type
+      | Void
+    and notwasm_value_type =
+      | I32
+      | F64
+      | Bool
+    and notwasm_pointer_type =
+      | Str
+      | Array of notwasm_type
+      | DynObject
+      | HT
+      | Function of notwasm_param_list_type * return_type
+      | Closure of notwasm_param_list_type * return_type
+      | Ref of notwasm_type
+      | Env
+      | InternalRecord of notwasm_type StringMap.t
+    
+    type bop =
+      | IntAdd
+      | IntSub 
+      | IntMul
+      | IntGT 
+      | IntLT 
+      | IntGE 
+      | IntLE 
+      | IntEqual
+      | PointerEqual
+      | FloatAdd
+      | FloatSub
+      | FloatMul
+      | FloatDiv
+    type boolean_literal = bool
+    type int_literal = int
+    type float_literal = float
+    type string_literal = string
+    type atom =
+      | IntLiteral of int_literal
+      | FloatLiteral of float_literal
+      | StringLiteral of string_literal
+      | NullLiteral
+      | BoundIdentifier of identifier
+      | ApplyPrimitive of primitive_function * atom list
+      | PointerDereference of notwasm_pointer_type
+      | ReadField of atom * string
+      | BinaryExpression of atom * bop * atom
+      | AnyLiteral of atom
+      | BoolLiteral of boolean_literal
+      | Cast of atom * notwasm_type
+      | EnvGet of identifier * notwasm_type
+    and primitive_function = identifier
+    and identifier = string
+
+    type expression =
+      | SingleAtom of atom
+      | ApplyPrimitiveMemory of identifier * atom list
+      | FunctionApplication of identifier * identifier list
+      | ClosureApplication of identifier * identifier list
+      | DynObjectLiteral
+      | RefLiteral of atom * notwasm_type
+      | ArrayPush of atom * atom
+      | ClosureLiteral of identifier * (identifier * notwasm_type) list
+
+    type statement =
+      | VarDeclare of var_declare
+      | If of atom * block * block
+      | Loop of block
+      | Return of atom
+      | Break 
+      | UpdateLocalVariable of identifier * expression
+      | HTSet of atom
+      | WriteField of atom * identifier * atom
+      | SingleExpression of expression
+    and block = statement list
+    and var_declare = identifier * notwasm_type * expression
+    type notwasm_func = {
+      func_name: identifier;
+      func_params: (identifier * notwasm_type) list;
+      func_ret: return_type;
+      func_is_closure: bool;
+      mutable func_body: block
+    }
+
+    type program = {
+      mutable notwasm_globals: var_declare list;
+      mutable notwasm_functions: notwasm_func list;
+      mutable main_func: notwasm_func;
+    }
+    type writer = {
+      w_program: program;
+      w_result: Backend.result;
+      w_out_channel: out_channel;
+      w_wat_output: string;
+      w_func_map: (var, notwasm_func) Hashtbl.t;
+      w_binder_map: (var, binder) Hashtbl.t;
+      mutable w_var_index: int;
+      w_variant_name_map: (string, int) Hashtbl.t;
+      w_closure_values: (var, identifier) Hashtbl.t;
+      w_primitive_vars: primitive_function Env.Int.t;
+      w_env_values: (var, int) Hashtbl.t;
+    }
+    let new_notwasm_writer result wat_output =
+      let main_func = {
+        func_name = "links_notwasm_main";
+        func_params = [];
+        func_ret = Void;
+        func_body = [];
+        func_is_closure = false;
+      } in
+      {
+        w_program = {
+          notwasm_globals = [];
+          notwasm_functions = [main_func];
+          main_func = main_func
+        };
+        w_result = result;
+        w_out_channel = open_out wat_output;
+        w_wat_output = wat_output;
+        w_func_map = Hashtbl.create 100;
+        w_binder_map = Hashtbl.create 100;
+        w_var_index = 0;
+        w_variant_name_map = Hashtbl.create 30;
+        w_closure_values = Hashtbl.create 30;
+        w_primitive_vars = Env.String.fold (fun key value acc -> Env.Int.bind value key acc) Lib.nenv Env.Int.empty;
+        w_env_values = Hashtbl.create 30;
+      }
+    
+    let add_binder writer binder =
+      let var = var_of_binder binder in
+      Hashtbl.add writer.w_binder_map var binder;
+      if writer.w_var_index < var then writer.w_var_index <- var else ()
+    let find_binder writer var =
+      Hashtbl.find writer.w_binder_map var
+    let next_var writer =
+      let v = writer.w_var_index + 1 in
+      writer.w_var_index <- v;
+      v
+    let notwasm_temp_var_name var =
+      "__notwasm_tmp_" ^ (string_of_int var)
+    let next_var_name writer =
+      let var = next_var writer in
+      notwasm_temp_var_name var
+    let add_closure writer var =
+      Hashtbl.add writer.w_closure_values var (next_var_name writer)
+    let is_closure writer var =
+      Hashtbl.mem writer.w_closure_values var
+    let closure_var_name writer var =
+      Hashtbl.find writer.w_closure_values var
+    let add_env writer var =
+      Hashtbl.add writer.w_env_values var 1
+    let is_env writer var =
+      Hashtbl.mem writer.w_env_values var
+    let find_ir_var_type writer v =
+      Env.String.find (Env.Int.find v writer.w_primitive_vars) Lib.type_env
+
+    let variant_kind writer variant_name =
+      match Hashtbl.find_opt writer.w_variant_name_map variant_name with
+      | Some index -> index
+      | None -> let index = Hashtbl.length writer.w_variant_name_map in
+        Hashtbl.add writer.w_variant_name_map variant_name index;
+        index
+
+    let rec ir_type_to_notwasm ir_type =
+      if string_of_datatype ir_type = "()" then InternalUnit
+      else
+        match ir_type with
+        | Primitive p -> ir_primitive_type_to_notwasm p
+        | Function (in_type, _, result_type) ->
+          let param_types = get_ir_func_params in_type |> List.map (fun t ->
+            let (_, b) = t in b 
+          ) in
+          let result_type = (match result_type with
+            | Primitive p -> ir_primitive_type_to_notwasm p
+            | ForAll (_quantifiers, underlying_type) -> ir_type_to_notwasm underlying_type
+            | f -> ir_type_to_notwasm f
+          ) in
+          let result_type = (match result_type with
+            | InternalUnit -> Void
+            | t -> ReturnT t
+          ) in
+          ReferenceType (Function (param_types, result_type))
+        | Effect _ -> raise (NotImplemented __LOC__)
+        | Var _ -> raise (NotImplemented __LOC__)
+        | Recursive _ -> raise (NotImplemented __LOC__)
+        | Not_typed -> raise (NotImplemented __LOC__)
+        | Alias _ -> raise (NotImplemented __LOC__)
+        | Application _ -> raise (NotImplemented __LOC__)
+        | RecursiveApplication _ -> raise (NotImplemented __LOC__)
+        | Meta point -> ir_meta_type_to_notwasm point
+        | Lolli _ -> raise (NotImplemented __LOC__)
+        | Record row -> ir_record_type_to_notwasm row
+        | Variant _ -> raise (NotImplemented __LOC__)
+        | Table _ -> raise (NotImplemented __LOC__)
+        | Lens _ -> raise (NotImplemented __LOC__)
+        | ForAll (_quantifiers, underlying_type) -> ir_type_to_notwasm underlying_type
+        | Row _ -> raise (NotImplemented ("row type: " ^ (string_of_datatype ir_type)))
+        | Closed -> raise (NotImplemented __LOC__)
+      (* Presence *)
+        | Absent -> raise (NotImplemented __LOC__)
+        | Present a -> raise (NotImplemented ("present type: " ^ (string_of_datatype a)))
+      (* Session *)
+        | Input _ -> raise (NotImplemented __LOC__)
+        | Output _ -> raise (NotImplemented __LOC__)
+        | Select _ -> raise (NotImplemented __LOC__)
+        | Choice _ -> raise (NotImplemented __LOC__)
+        | Dual _ -> raise (NotImplemented __LOC__)
+        | End -> raise (NotImplemented __LOC__)
+    and ir_meta_type_to_notwasm = fun point ->
+      (match Unionfind.find point with
+       | Var _ -> raise (NotImplemented __LOC__)
+       | Closed -> raise (NotImplemented __LOC__)
+       | Recursive _ -> raise (NotImplemented __LOC__)
+       | t -> ir_type_to_notwasm t
+      )
+    and ir_record_type_to_notwasm row =
+      match row with
+      | Row (field_map, _, _) -> ReferenceType (InternalRecord (StringMap.map (fun ir_type -> ir_field_type_to_notwasm ir_type) field_map))
+      | _ -> raise (Unreachable __LOC__)
+    and ir_field_type_to_notwasm field_type =
+      match field_type with
+      | Present t -> ir_type_to_notwasm t 
+      | _ -> ir_type_to_notwasm field_type
+    and extract_from_row r =
+      let (field_map, _, _) = r in
+      let types = StringMapExt.map (fun field_name field_type -> field_name, field_type |> ir_field_type_to_notwasm) field_map in
+      types
+    and extract_from_in_type = function
+      | Row r -> extract_from_row r 
+      | Record r -> extract_from_in_type r 
+      | _ -> raise (NotImplemented __LOC__)
+    and get_result_type f =
+      let rec get_ir_func_result_type = function 
+        | Types.Function (_, _, out_type) -> get_ir_func_result_type out_type
+        | Primitive p -> ir_primitive_type_to_notwasm p
+        | ForAll (_quantifiers, underlying_type) -> get_ir_func_result_type underlying_type
+        | f -> ir_type_to_notwasm f
+      in
+      match get_ir_func_result_type f with
+      | InternalUnit -> Void
+      | t -> ReturnT t
+    and get_ir_func_params in_type =
+      let origin_types = extract_from_in_type in_type in
+      reduce_unit_type_in_params origin_types
+    and reduce_unit_type_in_params params =
+      let params = if List.length params = 1 then 
+        let (_, t) = List.nth params 0 in
+          if is_unit_type t then []
+          else params
+        else params
+      in
+      params |> List.map (fun (a, t) ->
+        if is_unit_type t then (a, ReferenceType (DynObject))
+        else (a, t)
+      )
+    and is_unit_type t =
+      match t with
+      | InternalUnit -> true
+      | ReferenceType r -> (
+        match r with
+        | InternalRecord field_map -> StringMap.cardinal field_map = 0
+        | _ -> false
+      )
+      | _ -> false
+    and ir_param_to_notwasm param =
+      let name = "_" ^ (string_of_int (var_of_binder param)) in (* in links ir params don't have a name*)
+      let t = type_of_binder param |> ir_type_to_notwasm in
+      (name, t)
+    and ir_func_to_notwasm writer func =
+      let params = reduce_unit_type_in_params (List.map ir_param_to_notwasm func.fn_params) in
+      let result_type = get_result_type (type_of_binder func.fn_binder) in
+      let name = get_binder_name func.fn_binder in
+      let is_closure = match func.fn_closure with
+        | Some binder -> 
+          add_binder writer binder; 
+          add_closure writer (var_of_binder func.fn_binder);
+          add_env writer (var_of_binder binder);
+          true
+        | None -> false
+      in
+      let notwasm_func = declare_func writer name params result_type is_closure in
+      func.fn_params |> List.iter (add_binder writer);
+      Hashtbl.add writer.w_func_map (var_of_binder func.fn_binder) notwasm_func;
+      notwasm_func
+    and declare_func writer name params ret is_closure =
+      let new_fun = {
+        func_name = name;
+        func_params = params;
+        func_ret = ret;
+        func_body = [];
+        func_is_closure = is_closure;
+      } in
+      writer.w_program.notwasm_functions <- new_fun::writer.w_program.notwasm_functions;
+      new_fun
+    and get_binder_name binder =
+      let name = name_of_binder binder in
+      let var = var_of_binder binder in
+      name ^ "_" ^ (string_of_int var)
+    and get_var_name writer v =
+      let binder = find_binder writer v in
+      get_binder_name binder
+    and ir_primitive_type_to_notwasm t =
+      let open CommonTypes.Primitive in
+      match t with
+      | Bool   -> links_bool_type
+      | Int    
+      | Char    -> links_int_type
+      | Float   -> links_float_type
+      | XmlItem 
+      | DB      -> raise (NotImplemented __LOC__)
+      | String  -> links_string_type
+    and links_bool_type = ValueType Bool
+    and links_int_type = ValueType I32
+    and links_float_type = ValueType F64
+    and links_string_type = ReferenceType Str
+    let links_record_type = ReferenceType (InternalRecord (StringMap.empty))
+    let links_variant_type = ReferenceType (InternalRecord (StringMap.empty))
+    let links_unit_type = links_record_type
+    let links_variant_kind_type = ValueType (I32)
+    let links_variant_kind_field_name = "_variant_kind"
+    let closure_capture_field_name name = "__notwasm_captured_field_" ^ name
+
+    let find_func writer var =
+      Hashtbl.find writer.w_func_map var
+    let raise_unit_type () = raise (Unreachable "unit type should be detonted by DynObject type")
+
+    let default_value_expression notwasm_type =
+      let default_value_atom = function
+        | I32 -> IntLiteral 0
+        | F64 -> (FloatLiteral 0.0)
+        | Bool -> (BoolLiteral false)
+      in
+      match notwasm_type with
+      | Any -> raise (NotImplemented "cannot create a value of type any without underlying type")
+      | ValueType v -> SingleAtom (default_value_atom v)
+      | ReferenceType r -> (
+        match r with
+        | Str -> SingleAtom (StringLiteral "")
+        | Array _ -> ApplyPrimitiveMemory ("array_new", [])
+        | DynObject -> DynObjectLiteral
+        | HT -> ApplyPrimitiveMemory ("ht_new", [])
+        | Function _ -> SingleAtom NullLiteral
+        | Closure _ -> SingleAtom NullLiteral
+        | Ref underlying_type -> RefLiteral ((match underlying_type with
+          | ValueType v -> default_value_atom v
+          | _ -> raise (Unreachable "underlying type of ref must be value type")
+        ), underlying_type)
+        | Env -> SingleAtom NullLiteral
+        | InternalRecord _ -> DynObjectLiteral
+      )
+      | InternalUnit -> raise_unit_type ()
+
+    let declare_var_with _writer name nt_type exp =
+      VarDeclare (name, nt_type, exp)
+    let declare_global_with writer name nt_type exp =
+      let var_decl = (name, nt_type, exp) in
+      let var_stat = VarDeclare var_decl in
+      let program = writer.w_program in
+      program.notwasm_globals <- program.notwasm_globals @ [var_decl];
+      var_stat
+    let declare_var name nt_type =
+      let var_decl = (name, nt_type, default_value_expression nt_type) in
+      VarDeclare var_decl
+    let declare_global writer name nt_type =
+      declare_global_with writer name nt_type (default_value_expression nt_type)
+    
+    let rec type_of_tail_computation writer tail_computation =
+      match tail_computation with
+      | Ir.Return value -> type_of_value writer value
+      | Apply (f, args) -> type_of_apply writer f args
+      | Special _ -> raise (NotImplemented __LOC__)
+      | Case (_value, cases, default_case) ->
+        let case_computations = (StringMapExt.map (fun _ (_, (_bindings, tail)) -> tail) cases) @ (
+          match default_case with
+          | Some a -> let (_binder, (_bindings, tail)) = a in [tail]
+          | None -> []
+        )
+        in
+        let tail_types = case_computations |> List.map (type_of_tail_computation writer) in
+        common_type tail_types
+      | If (_value, if_case, else_case) ->
+        [if_case; else_case]
+        |> List.map (fun (_bindings, tail) -> tail)
+        |> List.map (type_of_tail_computation writer)
+        |> common_type
+    and assert_record_field_map notwasm_type =
+      match notwasm_type with
+      | ReferenceType r -> (match r with
+        | InternalRecord old_map -> old_map
+        | _ -> raise (Unreachable "not record")
+      )
+      | _ -> raise (Unreachable "not referencey type")
+    and extend_record_type writer new_fields old_value =
+      let old_map: notwasm_type StringMap.t = match old_value with
+        | Some value -> type_of_value writer value |> assert_record_field_map
+        | None -> StringMap.empty
+      in
+      let fields: (string * notwasm_type) list = new_fields |> StringMap.map (type_of_value writer) |> StringMapExt.map (fun name field_type -> (name, field_type)) in
+      let result_map = List.fold_left (fun (old_map: notwasm_type StringMap.t) (name, field_type) ->
+        StringMap.add name field_type old_map
+      ) old_map fields
+      in ReferenceType (InternalRecord result_map)
+    and erase_record_type writer delete_fields old_value =
+      let old_map = type_of_value writer old_value |> assert_record_field_map in
+      let result_map = StringSet.fold (fun field old_map ->
+        StringMap.remove field old_map
+      ) delete_fields old_map
+      in ReferenceType (InternalRecord result_map)
+    and type_of_constant c = Constant.type_of c |> ir_primitive_type_to_notwasm
+    and type_of_value writer value =
+      match value with
+      | Constant c -> type_of_constant c 
+      | Variable v -> type_of_var writer v 
+      | ApplyPure (f, args) -> type_of_apply writer f args
+      | Extend (new_fields, old_value) -> extend_record_type writer new_fields old_value
+      | Project (name, record_value) -> (
+        type_of_value writer record_value |> assert_record_field_map |> StringMap.find name
+      )
+      | Erase (delete_fields, old_value) -> erase_record_type writer delete_fields old_value
+      | Inject  _ -> raise (NotImplemented __LOC__)
+      | TAbs  _ -> raise (NotImplemented __LOC__)
+      (* TApp is probably function value, treat it as is *)
+      | TApp (value, tyargs) -> type_of_type_apply writer value tyargs
+      | XmlNode _ -> raise (NotImplemented __LOC__)
+      | Closure (var, _, _) -> type_of_var writer var
+      | Coerce (_value, to_type) -> ir_type_to_notwasm to_type
+    and type_of_type_apply writer value _tyargs =
+      type_of_value writer value
+    and type_of_var writer var =
+      (if is_primitive_var var then find_ir_var_type writer var
+      else find_binder writer var |> type_of_binder) |> ir_type_to_notwasm
+    and type_of_apply writer f args =
+      let applied_type = get_applied_value f |> type_of_value writer in 
+      let rec reduce_func_type func_type arg_num =
+        let reduce_function param_list return_type =
+          let param_num = List.length param_list in
+          let return_type = match return_type with
+            | ReturnT t -> t 
+            | Void -> links_unit_type
+          in
+          if arg_num >= param_num then reduce_func_type return_type (arg_num - param_num)
+          else raise (Unreachable "param number less than argument number")
+        in
+        match func_type with
+        | ReferenceType r -> (
+          match r with
+          | Function (param_list, return_type) -> reduce_function param_list return_type 
+          | Closure (param_list, return_type) -> reduce_function param_list return_type
+          | _ -> func_type
+        )
+        | _ -> func_type
+      in
+      reduce_func_type applied_type (List.length args)
+    and get_applied_value f =
+      match f with
+      | TApp (applied_value, _ty) -> applied_value
+      | _ -> assert false
+    and common_type types =
+      match types with
+      | [] -> raise (Unreachable "empty type list to compute a common type")
+      | first::_v -> first
+  end
+
+  module Collect = struct
+    open Grammar
+    let rec collect_program writer =
+      let (bindings, tail_computation) = writer.w_result.Backend.program in
+      let main_func = writer.w_program.main_func in
+      bindings |> List.iter (collect_binding writer main_func);
+      tail_computation |> collect_tail_computation writer main_func
+    and collect_binding writer func binding =
+      (* let collect_alien_var writer binder module_name = 
+        add_binder writer binder;
+        let local_name = get_binder_name binder in
+        add_global writer.wasm_module (Some local_name) (ir_type2Wasm (type_of_binder binder) |> to_val_type);
+        import_global writer binder module_name
+      in
+      let collect_alien_fun writer binder module_name =
+        add_binder writer binder;
+        import_func writer binder module_name
+      in *)
+      match binding with
+      | Let (binder, (type_var_list, tail_computation)) -> collect_let_binding writer func binder type_var_list tail_computation
+      | Fun fun_def -> 
+        collect_ir_fun writer fun_def
+      | Rec fun_defs ->
+        List.iter (collect_ir_fun writer) fun_defs
+      (* | Alien alien_info -> (
+        let binder = alien_info.binder in
+        let type_of_alien = type_of_binder binder |> ir_type2Wasm in
+        match type_of_alien with
+        | Func_type _ -> collect_alien_fun writer binder alien_info.object_name
+        | Val_type _ -> collect_alien_var writer binder alien_info.object_name
+        | _ -> assert false
+      ) *)
+      | Alien _ -> raise (NotImplemented "alien javascript not implemented in NotWasm")
+      | Module _ -> raise (NotImplemented __LOC__)
+    and collect_let_binding writer func binder _ty_var_list tail_computation =
+      add_binder writer binder;
+      collect_tail_computation writer func tail_computation
+    and collect_tail_computation writer func tail_computation =
+      match tail_computation with
+      | Return _ -> ()
+      | Apply _ -> ()
+      | Special _ -> raise (NotImplemented __LOC__)
+      | Case (_, cases, default_case) -> (
+        StringMap.iter (fun _ (binder, computation) ->
+          add_binder writer binder;
+          collect_computation writer func computation
+        ) cases;
+        match default_case with
+        | Some case -> 
+          let (binder, computation) = case in
+          add_binder writer binder;
+          collect_computation writer func computation
+        | None -> ()
+      )
+      | If (_, if_tail, else_tail) ->
+        collect_computation writer func if_tail;
+        collect_computation writer func else_tail
+    and collect_computation writer func computation =
+      let (bindings, tail_computation) = computation in
+      bindings |> List.iter (collect_binding writer func);
+      tail_computation |> collect_tail_computation writer func
+    and collect_ir_fun writer ir_func =
+      let notwasm_func = ir_func_to_notwasm writer ir_func in
+      add_binder writer ir_func.fn_binder;
+      collect_computation writer notwasm_func ir_func.fn_body
+  end
+
+  module Convert = struct
+    open Grammar
+    let rec conv_program writer =
+      let (bindings, tail) = writer.w_result.Backend.program in
+      let main_func = writer.w_program.main_func in
+      let bindings = bindings |> List.map (conv_binding writer main_func true) |> List.flatten in
+      let tail_computation_type = type_of_tail_computation writer tail in
+      let (_tail_temp_var_name, tail_stats) = match tail_computation_type with
+        | InternalUnit -> conv_tail_computation_to_temp_var writer main_func links_unit_type tail
+        | _ -> conv_tail_computation_to_temp_var writer main_func tail_computation_type tail 
+      in
+      main_func.func_body <- bindings @ tail_stats
+    and conv_binding writer func is_global binding: statement list =
+      match binding with
+      | Let (binder, (type_var_list, tail_computation)) -> 
+        conv_let_binding writer func binder type_var_list is_global tail_computation
+      | Fun fun_def -> 
+        conv_ir_fun writer fun_def; []
+      | Rec fun_defs ->
+        List.iter (conv_ir_fun writer) fun_defs; []
+      | Alien _ -> raise (NotImplemented "alien javascript not implemented in NotWasm")
+      | Module _ -> raise (NotImplemented __LOC__)
+    and conv_var_with writer name notwasm_type var_exp is_global =
+      if is_global then declare_global_with writer name notwasm_type var_exp
+      else declare_var_with writer name notwasm_type var_exp
+    and conv_var writer name notwasm_type is_global =
+      conv_var_with writer name notwasm_type (default_value_expression notwasm_type) is_global
+    and conv_set_value writer func var_name value =
+      let set_var exp =
+        [UpdateLocalVariable (var_name, exp)]
+      in
+      let field_set_of_record_value writer value =
+        let (fields, _) = type_of_value writer value |> assert_record_field_map |> StringMap.bindings |> List.split in
+        fields
+      in
+      let copy_record writer record_value_option =
+        let src_var_name = next_var_name writer in
+        let new_record_stat = VarDeclare (src_var_name, links_record_type, default_value_expression links_record_type) in
+        let fields = match record_value_option with
+          | Some record_value -> field_set_of_record_value writer record_value
+          | None -> []
+        in
+        let set_field_stats = List.map (fun t -> WriteField (BoundIdentifier var_name, t, (ReadField (BoundIdentifier src_var_name, t)))) fields in
+        new_record_stat::set_field_stats
+      in
+      match value with
+      | Constant c -> 
+        let exp = (SingleAtom (conv_constant c)) in
+        set_var exp
+      | Variable v ->
+        if is_closure writer v then set_var (SingleAtom (BoundIdentifier (closure_var_name writer v)))
+        else set_var (SingleAtom (BoundIdentifier (get_var_name writer v)))
+      | ApplyPure (f, args) -> 
+        let (arg_stats, exp) = conv_apply_pure writer func f args in
+        arg_stats @ (set_var exp)
+      | Extend (field_map, record_value) ->
+        let copy_stats = copy_record writer record_value in
+        let new_stats = StringMapExt.map (fun field_name value ->
+          let value_var_name = next_var_name writer in
+          let value_declare_stat = declare_var value_var_name links_record_type in
+          let value_stats = conv_set_value writer func value_var_name value in
+          let set_stat = WriteField (BoundIdentifier var_name, field_name, BoundIdentifier value_var_name) in
+          value_declare_stat::value_stats @ [set_stat]
+        ) field_map |> List.flatten
+        in
+        copy_stats @ new_stats
+      | Project (field_name, record_value) ->
+        let old_record_value_var_name = next_var_name writer in
+        let is_env value =
+          match value with
+          | Variable v -> is_env writer v 
+          | _ -> false
+        in
+        let is_env_project = is_env record_value in
+        let field_type = 
+          type_of_value writer record_value |> assert_record_field_map |> StringMap.find field_name 
+        in
+        let declare_stat = declare_var old_record_value_var_name links_record_type in
+        let record_stats = conv_set_value writer func old_record_value_var_name record_value in
+        let compose atom = 
+          declare_stat::record_stats @ (set_var (SingleAtom atom))
+        in
+        if is_env_project then compose (EnvGet (closure_capture_field_name field_name, field_type))
+        else compose (Cast ((ReadField (BoundIdentifier old_record_value_var_name, field_name)), field_type))
+      | Erase (field_set, record_value) ->
+        let copy_stats =
+          let src_var_name = next_var_name writer in
+          let new_record_stat = declare_var src_var_name links_record_type in
+          let fields = field_set_of_record_value writer record_value in
+          let fields = List.filter (fun t -> not (StringSet.mem t field_set)) fields in
+          let set_field_stats = List.map (fun t -> WriteField (BoundIdentifier var_name, t, ReadField (BoundIdentifier src_var_name, t))) fields in
+          new_record_stat::set_field_stats
+        in
+        copy_stats
+      | Inject  _ -> raise (NotImplemented __LOC__)
+      | TAbs  _ -> raise (NotImplemented __LOC__)
+      (* TApp is probably function value, treat it as is *)
+      | TApp (value, _tyargs) -> (
+        let applied_var_name = next_var_name writer in
+        let assign_stats = conv_set_value writer func applied_var_name value in
+        (declare_var applied_var_name (type_of_value writer value))::assign_stats @ set_var (SingleAtom (BoundIdentifier applied_var_name))
+      )
+      | XmlNode _ -> raise (NotImplemented __LOC__)
+      | Closure (func_var, _ty_var_list, record_value) ->
+        let field_map = 
+          record_value |> type_of_value writer |> assert_record_field_map |>
+          StringMapExt.map (fun name t -> ((closure_capture_field_name name), t))
+        in
+        set_var (ClosureLiteral (get_var_name writer func_var, field_map))
+      | Coerce (value, ir_type) ->
+        let notwasm_type = ir_type_to_notwasm ir_type in
+        let applied_var_name = next_var_name writer in
+        let assign_stats = conv_set_value writer func applied_var_name value in
+        (declare_var applied_var_name (type_of_value writer value))::assign_stats @ set_var (SingleAtom (Cast (BoundIdentifier applied_var_name, notwasm_type)))
+    and conv_let_binding writer (func: notwasm_func) (binder: binder) (_ty_var_list: tyvar list) (is_global: bool) tail_computation =
+      let name = get_binder_name binder in
+      let notwasm_type = ir_type_to_notwasm (type_of_binder binder) in
+      conv_let_binding_to_var_name writer func _ty_var_list is_global name notwasm_type tail_computation
+    and conv_let_binding_to_var_name writer (func: notwasm_func) _ty_var_list (is_global: bool) (var_name: identifier) (notwasm_type: notwasm_type) tail_computation: statement list =
+      let conv_var_with_init_value writer var_name notwasm_type is_global value =
+        (conv_var writer var_name notwasm_type is_global)::(conv_set_value writer func var_name value)
+      in
+      let conv_computation computation =
+        let (bindings, if_tail) = computation in
+        let if_bindings_stats = List.map (conv_binding writer func false) bindings |> List.flatten in
+        let (if_var_name, if_tail_stats) = conv_tail_computation_to_temp_var writer func notwasm_type if_tail in
+        if_bindings_stats @ if_tail_stats @ [UpdateLocalVariable (var_name, SingleAtom (BoundIdentifier if_var_name))]
+      in
+      let init_value_exp = match tail_computation with
+        | Ir.Return value -> (
+          match value with
+          | Constant c -> 
+            let exp = SingleAtom (conv_constant c) in
+            [conv_var_with writer var_name notwasm_type exp is_global]
+          | Variable v ->
+            let var_exp = SingleAtom (BoundIdentifier (get_var_name writer v)) in
+            [conv_var_with writer var_name notwasm_type var_exp is_global]
+          | _ -> conv_var_with_init_value writer var_name notwasm_type is_global value 
+        )
+        | Apply (f, args) ->
+          let (arg_stats, value_exp) = conv_apply writer func f args in
+          arg_stats @ [conv_var_with writer var_name notwasm_type value_exp is_global]
+        | Special _ -> raise (NotImplemented __LOC__)
+        | Case (value, cases, default_case) -> (
+          let init_var_stat = conv_var writer var_name notwasm_type is_global in
+          let case_value_temp_var_name = next_var_name writer in
+          let predicate_value_type = links_variant_type in
+          let case_value_declare_stat = declare_var case_value_temp_var_name predicate_value_type in
+          let predicate_stats = conv_var_with_init_value writer case_value_temp_var_name predicate_value_type false value in
+          let (variant_kind_temp_var_name, variant_kind_stat) = get_variant_kind writer case_value_temp_var_name in
+          let one_case variant_name (_binder, computation) =
+            let (match_result_var, variant_match_stats) = conv_match_variant writer variant_kind_temp_var_name variant_name in
+            let bind_case_var_stats = [] in
+            let computation_stats = conv_computation computation in
+            (variant_match_stats, match_result_var, bind_case_var_stats @ computation_stats)
+          in
+          let convert_all_cases = StringMapExt.map one_case cases in
+          let init_var_stats = [init_var_stat; case_value_declare_stat] @ predicate_stats @ variant_kind_stat @ (List.map (fun (a, _, _) -> a) convert_all_cases |> List.flatten) in
+          let default_case_stats = match default_case with
+            | Some (binder, computation) ->
+              let bind_case_var_stats = VarDeclare ((get_binder_name binder), predicate_value_type, (SingleAtom (BoundIdentifier case_value_temp_var_name))) in
+              let computation_stats = conv_computation computation in
+              ([bind_case_var_stats] @ computation_stats)
+            | None -> []
+          in
+          let case_stats = if StringMap.cardinal cases = 0 then default_case_stats
+            else List.fold_right (fun (_, match_result_var, if_stats) else_stats -> [Grammar.If ((BoundIdentifier match_result_var), if_stats, else_stats)]) convert_all_cases default_case_stats 
+          in
+          init_var_stats @ case_stats
+        )
+        | If (value, if_computation, else_computation) -> 
+          let predicate_var_name = next_var_name writer in
+          let predicate_stats = conv_var_with_init_value writer predicate_var_name (ValueType Bool) false value in
+          let init_var_stat = conv_var writer var_name notwasm_type is_global in
+          let init_var_stats = predicate_stats @ [init_var_stat] in
+          let if_stats = conv_computation if_computation in
+          let else_stats = conv_computation else_computation in
+          init_var_stats @ [Grammar.If ((BoundIdentifier predicate_var_name), if_stats, else_stats)]
+      in init_value_exp
+    and conv_tail_computation_to_temp_var writer func notwasm_type tail_computation =
+      let var_name = next_var_name writer in
+      let stats = conv_let_binding_to_var_name writer func [] false var_name notwasm_type tail_computation in
+      (var_name, stats)
+    and get_variant_kind writer variant_var =
+      let variant_kind_temp_var_name = next_var_name writer in
+      let variant_kind_stat = VarDeclare (variant_kind_temp_var_name, links_variant_kind_type, SingleAtom (ReadField ((BoundIdentifier variant_var), links_variant_kind_field_name))) in
+      (variant_kind_temp_var_name, [variant_kind_stat])
+    and conv_match_variant writer variant_kind_temp_var_name variant_name =
+      let match_result_var = next_var_name writer in
+      let variant_match_stat = VarDeclare (match_result_var, (ValueType Bool), SingleAtom (BinaryExpression (BoundIdentifier variant_kind_temp_var_name, IntEqual, IntLiteral (variant_kind writer variant_name)))) in
+      (match_result_var, [variant_match_stat])
+    and conv_ir_fun writer ir_fun =
+      let notwasm_func = find_func writer (var_of_binder ir_fun.fn_binder) in
+      let (bindings, tail) = ir_fun.fn_body in
+      let binding_stats = List.map (conv_binding writer notwasm_func false) bindings |> List.flatten in
+      let tail_computation_type = type_of_tail_computation writer tail in
+      let (tail_temp_var_name, tail_stats) = match tail_computation_type with
+        | InternalUnit -> conv_tail_computation_to_temp_var writer notwasm_func links_unit_type tail
+        | _ -> conv_tail_computation_to_temp_var writer notwasm_func tail_computation_type tail 
+      in
+      let stats = binding_stats @ tail_stats @ [Return (BoundIdentifier tail_temp_var_name)] in
+      notwasm_func.func_body <- stats
+    (* and tail_computation_is_single_atom tail_computation =
+      match tail_computation with
+      | Ir.Return value -> (
+        match value with
+        | Constant _ -> true
+        | Variable _ -> true
+        | _ -> false
+      )
+      | _ -> false *)
+    and conv_arg writer func value =
+      let arg_var_name = next_var_name writer in
+      let arg_stats = conv_set_value writer func arg_var_name value in
+      ((declare_var arg_var_name (type_of_value writer value))::arg_stats, arg_var_name)
+    and conv_args writer func values =
+      let (stats, names) = List.map (conv_arg writer func) values |> List.split in
+      (List.flatten stats, names)
+    and conv_constant (const_value: Constant.t) =
+      let open CommonTypes.Constant in
+      match const_value with
+      | Bool value -> BoolLiteral value
+      | Char value -> StringLiteral (string_of_char value)
+      | Int value -> IntLiteral value
+      | Float value -> FloatLiteral value
+      | String value -> StringLiteral value
+    (* and conv_read_var writer var =
+      BoundIdentifier (get_var_name writer var) *)
+    (* and conv_func_value writer var =
+      conv_read_var var *)
+    and conv_apply writer func f args =
+      conv_apply_pure writer func f args
+    and conv_apply_pure writer func f args =
+      match f with
+      | TApp (applied_value, _) -> (
+        let call_insc = match applied_value with
+          | Variable v -> conv_ir_func_call writer func v args
+          | _ -> raise (NotImplemented __LOC__)
+        in call_insc
+      )
+      | Variable v -> conv_ir_func_call writer func v args (* probably a closure here*)
+      | _ -> raise (Unreachable __LOC__)
+    and conv_ir_func_call writer func v args =
+      if is_primitive_var v then conv_primitive_ir_func_call writer func v args
+      else conv_normal_ir_func_call writer func v args
+    and conv_primitive_ir_func_call writer func v args =
+      let name = primitive_name v in
+      let (arg_stats, arg_names) = conv_args writer func args in
+      let op1 = match List.nth_opt arg_names 0 with
+        | Some op1 -> Some (BoundIdentifier op1)
+        | None -> None
+      in
+      let op2 = match List.nth_opt arg_names 1 with
+        | Some op2 -> Some (BoundIdentifier op2)
+        | None -> None
+      in
+      let op1_type = match List.nth_opt args 0 with
+        | Some o -> Some (type_of_value writer o)
+        | None -> None
+      in
+      let try_compose_int_binary operator =
+        SingleAtom (BinaryExpression (non_null op1, operator, non_null op2))
+      in
+      let try_compose_int_operator operator =
+        let try_compare_pointer () = 
+          match operator with
+          | IntEqual -> SingleAtom (BinaryExpression (non_null op1, PointerEqual, non_null op2))
+          | _ -> raise (NotImplemented "pointer only supports equality test")
+        in
+        (match (non_null op1_type) with
+          | Any -> raise (Unreachable "cannot compare any value")
+          | ValueType v -> (
+            match v with
+              | I32 -> SingleAtom (BinaryExpression (non_null op1, operator, non_null op2))
+              | _ -> raise (NotImplemented "float comparison")
+            )
+          | ReferenceType _ -> try_compare_pointer ()
+          | InternalUnit -> raise_unit_type ()
+        )
+      in
+      let try_compose_float_unary_operator name =
+        let op1 = non_null op1 in
+        ApplyPrimitiveMemory (name, [NullLiteral; NullLiteral; op1])
+      in
+      let exp = match name with
+        | "+" -> try_compose_int_binary IntAdd
+        | "-" -> try_compose_int_binary IntSub
+        | "*" -> try_compose_int_binary IntMul
+        | "+." -> try_compose_int_binary FloatAdd
+        | "-." -> try_compose_int_binary FloatSub
+        | "*." -> try_compose_int_binary FloatMul
+        | "/." -> try_compose_int_binary FloatDiv
+        | "==" -> try_compose_int_operator IntEqual
+        | "!=" -> try_compose_int_operator IntEqual
+        | ">=" -> try_compose_int_operator IntGE
+        | "<=" -> try_compose_int_operator IntLE
+        | ">" -> try_compose_int_operator IntLT
+        | "<" -> try_compose_int_operator IntGT
+        | "sqrt" -> try_compose_float_unary_operator "math_sqrt"
+        | _ -> raise (NotImplemented ("primitive links function\"" ^ name ^ "\"not implemented in notwasm backend"))
+      in
+      (arg_stats, exp)
+    and conv_normal_ir_func_call writer func v args =
+      let (arg_stats, arg_names) = conv_args writer func args in
+      let name = get_var_name writer v in
+      let exp = if is_closure writer v then ClosureApplication (name, arg_names)
+        else FunctionApplication (name, arg_names)
+      in
+      (arg_stats, exp)
+  end
+
+  module Write = struct
+    open Grammar
+    type pretty_print_element =
+    | IncIndent
+    | DecIndent
+    | LineIndent
+    | IncWithLineIndent
+    | DecWithLineIndent
+    | L of string
+    | S
+    | Seq of pretty_print_element list
+
+    type printer = {
+      mutable indent: int;
+      indent_ws_num: int;
+    }
+    let new_printer indent_ws_num = {
+      indent = 0;
+      indent_ws_num = indent_ws_num;
+    }
+
+    let give_indent_string pt = 
+      String.make (pt.indent * pt.indent_ws_num) ' '
+    let increment_indent pt = 
+      pt.indent <- pt.indent + 1
+    let decrement_indent pt =
+      pt.indent <- pt.indent - 1
+    let give: printer -> string -> string = fun _pt some ->
+      some
+    let give_line: printer -> string option -> string = fun pt some ->
+      match some with
+      | Some alp -> alp ^ (give pt (alp ^ "\n"))
+      | None -> give pt "\n"
+    let give_line_indent pt =
+      (give_line pt None) ^ (give_indent_string pt)
+
+    let rec to_string pt element =
+      match element with
+      | IncIndent -> increment_indent pt; ""
+      | DecIndent -> decrement_indent pt; ""
+      | S -> " "
+      | LineIndent -> give_line_indent pt
+      | IncWithLineIndent -> 
+        let _ = to_string pt IncIndent in
+        to_string pt LineIndent
+      | DecWithLineIndent -> 
+        let _ = to_string pt DecIndent in
+        to_string pt LineIndent
+      | L s -> give pt s
+      | Seq elements -> List.map (to_string pt) elements |> String.concat "" 
+
+    let reduce_type notwasm_type =
+      match notwasm_type with
+      | ValueType _ -> notwasm_type
+      | Any -> notwasm_type
+      | InternalUnit -> ReferenceType DynObject
+      | ReferenceType r -> (
+        match r with
+        | InternalRecord _ -> ReferenceType DynObject
+        | _ -> notwasm_type
+      )
+
+    let merge_parts parts =
+      ListExt.concat_with LineIndent parts
+
+    let rec write_program writer =
+      let program = writer.w_program in
+      let globals = program.notwasm_globals |> List.map write_global |> merge_parts in
+      let functions = program.notwasm_functions |> List.map (fun t -> Seq (write_function t)) |> merge_parts in
+      let parts = Seq (globals @ [LineIndent] @ functions) in
+      let filename = writer.w_wat_output |> SysExt.get_filename_without_extension |> (fun t -> t ^ ".notwasm") in
+      let output = open_out filename in
+      Printf.fprintf output "%s" (to_string (new_printer 4) parts);
+      close_out output
+    and write_global var_declare =
+      Seq (write_var_declare var_declare)
+    and write_var_declare (name, t, init_exp) =
+      [L "var "; L name; L ": "] @ [write_notwasm_type t] @ [L " = "] @ (write_exp init_exp) @ [L ";"]
+    and write_exp exp =
+      match exp with
+      | SingleAtom atom -> [write_atom atom]
+      | ApplyPrimitiveMemory (name, args) -> [L "!"; L name; L "("] @ (write_atoms args) @ [L ")"]
+      | FunctionApplication (name, names) -> [L name; L "("] @ (write_names names) @ [L ")"]
+      | ClosureApplication (name, names) -> [L name; L "!("] @ (write_names names) @ [L ")"]
+      | DynObjectLiteral -> [L "{}"]
+      | RefLiteral (atom, t) -> [L "newRef("] @ [write_atom atom] @ [L ", "] @ [write_notwasm_type t]
+      | ArrayPush (atom, elem) -> [L "arrayPush("] @ [write_atom atom] @ [L ", "] @ [write_atom elem]
+      | ClosureLiteral (func_name, field_type_list) -> 
+        let fields = field_type_list 
+          |> List.map (fun (name, t) ->
+            Seq ([L name; L ": "] @ [write_notwasm_type t])
+          ) 
+          |> (fun t -> (L func_name)::t)
+          |> ListExt.concat_with (L ", ")
+        in
+        [L "clos"; L "("] @ fields @ [L ")"]
+    and write_notwasm_type notwasm_type =
+      match reduce_type notwasm_type with
+      | Any -> L "any"
+      | ValueType v -> (
+        match v with
+        | I32 -> L "i32"
+        | F64 -> L "f64"
+        | Bool -> L "bool"
+      )
+      | ReferenceType r -> (
+        match r with
+        | Array _ -> raise (Unreachable "array is not represented in links")
+        | DynObject -> L "DynObject"
+        | Function (params, return) -> write_function_type params return
+        | Closure (params, return) -> Seq [L "clos "; write_function_type params return]
+        | HT -> L "HT"
+        | Ref underlying_type -> Seq [L "Ref("; write_notwasm_type underlying_type; L ")"]
+        | Env -> L "env"
+        | _ -> raise (Unreachable "should be reduced")
+      )
+      | _ -> raise (Unreachable "should be reduced")
+    and write_function_type params return =
+      let params_elem = params |> List.map write_notwasm_type |> ListExt.concat_with (L ", ") in
+      let ret_elem = write_return_type return in
+      Seq ([L "("] @ params_elem @ [L ") -> "] @ ret_elem)
+    and write_statement = function
+      | VarDeclare v -> write_var_declare v
+      | If (atom, if_block, else_block) ->
+        [L "if ("] @ [write_atom atom] @ [L ") "] @ (write_block if_block) @ [L " else "] @ (write_block else_block)
+      | Loop block -> [L "loop "] @ (write_block block)
+      | Return atom -> [L "return "] @ [write_atom atom] @ [L ";"]
+      | Break -> [L "break;"]
+      | UpdateLocalVariable (name, exp) -> [L name; L " = "] @ (write_exp exp) @ [L ";"]
+      | HTSet _ -> raise (Unreachable "hashtable not used in links")
+      | WriteField (src, field, dst) -> [write_atom src] @ [L "."; L field; L " = "] @ [write_atom dst] @ [L ";"]
+      | SingleExpression exp -> (write_exp exp) @ [L ";"]
+    and write_atom = function
+      | IntLiteral v -> L (string_of_int v)
+      | FloatLiteral v -> L (string_of_float v)
+      | StringLiteral v -> L v
+      | NullLiteral -> L "null"
+      | BoundIdentifier id -> L id
+      | ApplyPrimitive (id, atoms) -> Seq ([L "$"; L id; L "("] @ (write_atoms atoms) @ [L ")"])
+      | PointerDereference _ -> raise (Unreachable "deref not used in links")
+      | ReadField (atom, field) -> Seq ([write_atom atom] @ [L "."; L field])
+      | BinaryExpression (l, op, r) ->
+        let op_name = match op with
+        | IntAdd -> "+"
+        | IntSub -> "-"
+        | IntMul -> "*"
+        | IntGT -> ">"
+        | IntLT -> "<"
+        | IntGE -> ">="
+        | IntLE -> "<="
+        | IntEqual -> "=="
+        | PointerEqual -> "==="
+        | FloatAdd -> "+."
+        | FloatSub -> "-."
+        | FloatMul -> "*."
+        | FloatDiv -> "/."
+        in
+        Seq ([write_atom l] @ [S; L op_name; S] @ [write_atom r])
+      | AnyLiteral atom -> Seq ([L "any("] @ [write_atom atom] @ [L ")"])
+      | BoolLiteral v -> L (string_of_bool v)
+      | Cast (atom, t) -> Seq ([write_atom atom] @ [L " as "] @ [write_notwasm_type t])
+      | EnvGet (field, t) -> Seq ([L "env."; L field; L ": "] @ [write_notwasm_type t])
+    and write_atoms atoms =
+      List.map write_atom atoms |> ListExt.concat_with (L ", ")
+    and write_names names =
+      List.map (fun t -> L t) names |> ListExt.concat_with (L ", ")
+    and write_block block =
+      let body = List.map (fun t -> Seq (write_statement t)) block |> ListExt.concat_with (LineIndent) in
+      [L "{"; IncWithLineIndent] @ body @ [DecWithLineIndent; L "}"]
+    and write_function func =
+      let title = [L "function "; L (func.func_name)] in
+      let params = func.func_params 
+        |> List.map (fun (name, t) -> Seq ([L name; L ": "] @ [write_notwasm_type t]))
+        |> ListExt.concat_with (L ", ") in
+      let signature = [L "("] @ (
+        if func.func_is_closure then [L "_: env"] else []
+      ) @ (
+        if func.func_is_closure && List.length params > 0 then [L ", "] else []
+      ) @ params @ [L ")"] @ (match func.func_ret with
+        | ReturnT t -> [L " : "; write_notwasm_type t]
+        | Void -> []
+      )
+      in
+      title @ signature @ [S] @ (write_block func.func_body)
+    and write_return_type = function
+      | ReturnT t -> [write_notwasm_type t]
+      | Void -> []
+  end
+
+  let compile_ir_to_notwasm result wat_output =
+    let writer = Grammar.new_notwasm_writer result wat_output in
+    Ir.string_of_program result.Backend.program |> Debug.print;
+    Collect.collect_program writer;
+    Convert.conv_program writer;
+    Write.write_program writer;
+    ()
+end
+
 module type WASM_PERFORMANCE = sig
   val measure_wasm_performance: bool Settings.setting
   val trans: string -> unit
@@ -1778,7 +2832,8 @@ end
 open Wasm
 open Wasm_performance
 let run (result: Backend.result) output_wat =
-  let output_stream2 = open_out ((SysExt.get_filename_without_extension output_wat) ^ ".wat") in
-  let writer2 = Wasm.Pretty_printing.new_wasm_writer output_wat false (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$$default_module") in
+  (* let output_stream2 = open_out ((SysExt.get_filename_without_extension output_wat) ^ ".wat") in
+  let writer2 = Wasm.Pretty_printing.new_wasm_writer output_wat false (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$$default_module") in *)
   if Settings.get (Wasm_performance.measure_wasm_performance) then trans ((SysExt.get_filename_without_extension output_wat) ^ ".links") else ();
-  Ir2WasmAst.compile_links_ir_to_wasm writer2 result
+  (* Ir2WasmAst.compile_links_ir_to_wasm writer2 result; *)
+  NotWasm.compile_ir_to_notwasm result output_wat

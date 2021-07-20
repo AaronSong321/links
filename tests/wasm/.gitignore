@@ -1,0 +1,7 @@
+# wasm backend
+*.wat
+*.wasm
+g.sh
+js-proj/node_modules/
+js-proj/package-lock.json
+*.notwasm
