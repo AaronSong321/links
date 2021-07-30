@@ -1764,11 +1764,14 @@ module NotWasm = struct
       | IntGE 
       | IntLE 
       | IntEqual
+      | IntNeq
       | PointerEqual
       | FloatAdd
       | FloatSub
       | FloatMul
       | FloatDiv
+      (* | FloatLE *)
+      | FloatGE
     type boolean_literal = bool
     type int_literal = int
     type float_literal = float
@@ -2185,9 +2188,18 @@ module NotWasm = struct
       | Coerce (_value, to_type) -> ir_type_to_notwasm to_type
     and type_of_type_apply writer value _tyargs =
       type_of_value writer value
+    and function_type_to_closure t1 =
+      match t1 with
+      | ReferenceType r -> (match r with
+        | Function (params, ret) -> ReferenceType (Closure (params, ret))
+        | _ -> t1
+      )
+      | _ -> t1
     and type_of_var writer var =
-      (if is_primitive_var var then find_ir_var_type writer var
-      else find_binder writer var |> type_of_binder) |> ir_type_to_notwasm
+      let t1 = (if is_primitive_var var then find_ir_var_type writer var
+      else find_binder writer var |> type_of_binder) |> ir_type_to_notwasm in
+      if is_closure writer var then function_type_to_closure t1
+      else t1
     and type_of_apply writer f args =
       let applied_type = get_applied_value f |> type_of_value writer in 
       let rec reduce_func_type func_type arg_num =
@@ -2198,6 +2210,7 @@ module NotWasm = struct
             | Void -> links_unit_type
           in
           if arg_num >= param_num then reduce_func_type return_type (arg_num - param_num)
+          else if arg_num = 0 then applied_type
           else raise (Unreachable "param number less than argument number")
         in
         match func_type with
@@ -2410,7 +2423,13 @@ module NotWasm = struct
               let var = int_of_string name_of_captured_var in
               (get_var_name writer var, type_of_var writer var)
             ) field_map
-          | _ -> raise (Unreachable __LOC__)
+          | Variable v -> 
+            let field_map = v |> type_of_var writer |> assert_record_field_map in
+            StringMapExt.map (fun name_of_captured_var _ ->
+              let var = int_of_string name_of_captured_var in
+              (get_var_name writer var, type_of_var writer var)
+            ) field_map
+          | _ -> Printf.printf "k: %s\n%!" (string_of_value (record_value)); raise (Unreachable __LOC__)
         in
         set_var (ClosureLiteral (get_var_name writer func_var, field_map))
       | Coerce (value, ir_type) ->
@@ -2494,7 +2513,7 @@ module NotWasm = struct
       (var_name, stats)
     and get_variant_kind writer variant_var =
       let variant_kind_temp_var_name = next_var_name writer in
-      let variant_kind_stat = VarDeclare (variant_kind_temp_var_name, links_variant_kind_type, SingleAtom (ReadField ((BoundIdentifier variant_var), links_variant_kind_field_name))) in
+      let variant_kind_stat = VarDeclare (variant_kind_temp_var_name, links_variant_kind_type, SingleAtom (Cast ((ReadField ((BoundIdentifier variant_var), links_variant_kind_field_name)), (ValueType I32)))) in
       (variant_kind_temp_var_name, [variant_kind_stat])
     and conv_match_variant writer variant_kind_temp_var_name variant_name =
       let match_result_var = next_var_name writer in
@@ -2509,7 +2528,11 @@ module NotWasm = struct
         | InternalUnit -> conv_tail_computation_to_temp_var writer notwasm_func links_unit_type tail
         | _ -> conv_tail_computation_to_temp_var writer notwasm_func tail_computation_type tail 
       in
-      let stats = binding_stats @ tail_stats @ [Return (BoundIdentifier tail_temp_var_name)] in
+      let return_stat = match tail_computation_type with
+        | InternalUnit -> []
+        | _ -> [Grammar.Return (BoundIdentifier tail_temp_var_name)]
+      in
+      let stats = binding_stats @ tail_stats @ return_stat in
       notwasm_func.func_body <- stats
     and conv_arg writer func value =
       let arg_var_name = next_var_name writer in
@@ -2533,6 +2556,12 @@ module NotWasm = struct
       | TApp (applied_value, _) -> (
         let call_insc = match applied_value with
           | Variable v -> conv_ir_func_call writer func v args
+          | Closure (func_var, _, _) ->
+            let func_var_name = next_var_name writer in
+            let init_closure_stats = [declare_var func_var_name (type_of_var writer func_var)] in
+            let conv_closure_stats = conv_set_value writer func func_var_name f in
+            let (call_stats, call_exp) = conv_closure_call writer func func_var_name args in
+            (init_closure_stats @ conv_closure_stats @ call_stats, call_exp)
           | _ -> raise (NotImplemented __LOC__)
         in call_insc
       )
@@ -2562,14 +2591,32 @@ module NotWasm = struct
       let try_compose_int_operator operator =
         let try_compare_pointer () = 
           match operator with
-          | IntEqual -> SingleAtom (BinaryExpression (non_null op1, PointerEqual, non_null op2))
+          | "==" -> SingleAtom (BinaryExpression (non_null op1, PointerEqual, non_null op2))
           | _ -> raise (NotImplemented "pointer only supports equality test")
         in
         (match (non_null op1_type) with
           | Any -> raise (Unreachable "cannot compare any value")
           | ValueType v -> (
             match v with
-              | I32 -> SingleAtom (BinaryExpression (non_null op1, operator, non_null op2))
+              | I32 -> (
+                let binaryExp = match operator with 
+                | "==" -> BinaryExpression (non_null op1, IntEqual, non_null op2)
+                | "!=" -> BinaryExpression (non_null op1, IntNeq, non_null op2)
+                | ">=" -> BinaryExpression (non_null op1, IntGE, non_null op2)
+                | ">" -> BinaryExpression (non_null op1, IntGT, non_null op2)
+                | "<=" -> BinaryExpression (non_null op1, IntLE, non_null op2)
+                | "<" -> BinaryExpression (non_null op1, IntLT, non_null op2)
+                | _ -> raise (Unreachable __LOC__)
+                in SingleAtom(binaryExp)
+              )
+              | F64 -> (
+                let binaryExp = match operator with 
+                (* | "==" -> BinaryExpression (non_null op1, FloatLE, non_null op2) *)
+                | ">=" | ">" -> BinaryExpression (non_null op2, FloatGE, non_null op1)
+                | "<=" | "<" -> BinaryExpression (non_null op1, FloatGE, non_null op2)
+                | _ -> raise (Unreachable __LOC__)
+                in SingleAtom(binaryExp)
+              )
               | _ -> raise (NotImplemented "float comparison")
             )
           | ReferenceType _ -> try_compare_pointer ()
@@ -2588,12 +2635,12 @@ module NotWasm = struct
         | "-." -> try_compose_int_binary FloatSub
         | "*." -> try_compose_int_binary FloatMul
         | "/." -> try_compose_int_binary FloatDiv
-        | "==" -> try_compose_int_operator IntEqual
-        | "!=" -> try_compose_int_operator IntEqual
-        | ">=" -> try_compose_int_operator IntGE
-        | "<=" -> try_compose_int_operator IntLE
-        | ">" -> try_compose_int_operator IntLT
-        | "<" -> try_compose_int_operator IntGT
+        | "==" -> try_compose_int_operator "=="
+        | "!=" -> try_compose_int_operator "!="
+        | ">=" -> try_compose_int_operator ">="
+        | "<=" -> try_compose_int_operator "<="
+        | ">" -> try_compose_int_operator ">"
+        | "<" -> try_compose_int_operator "<"
         | "sqrt" -> try_compose_float_unary_operator "math_sqrt"
         | _ -> raise (NotImplemented ("primitive links function\"" ^ name ^ "\"not implemented in notwasm backend"))
       in
@@ -2605,6 +2652,10 @@ module NotWasm = struct
         else FunctionApplication (name, arg_names)
       in
       (arg_stats, exp)
+    and conv_closure_call writer func name args =
+      let (stats, names) = conv_args writer func args in
+      let exp = ClosureApplication(name, names) in
+      (stats, exp)
   end
 
   module Write = struct
@@ -2742,7 +2793,7 @@ module NotWasm = struct
       | SingleExpression exp -> (write_exp exp) @ [L ";"]
     and write_atom = function
       | IntLiteral v -> L (string_of_int v)
-      | FloatLiteral v -> L (string_of_float v)
+      | FloatLiteral v -> L (notwasm_float v)
       | StringLiteral v -> L v
       | NullLiteral -> L "null"
       | BoundIdentifier id -> L id
@@ -2759,17 +2810,23 @@ module NotWasm = struct
         | IntGE -> ">="
         | IntLE -> "<="
         | IntEqual -> "=="
+        | IntNeq -> "!="
         | PointerEqual -> "==="
         | FloatAdd -> "+."
         | FloatSub -> "-."
         | FloatMul -> "*."
         | FloatDiv -> "/."
+        | FloatGE -> ">."
         in
         Seq ([write_atom l] @ [S; L op_name; S] @ [write_atom r])
       | AnyLiteral atom -> Seq ([L "any("] @ [write_atom atom] @ [L ")"])
       | BoolLiteral v -> L (string_of_bool v)
       | Cast (atom, t) -> Seq ([write_atom atom] @ [L " as "] @ [write_notwasm_type t])
       | EnvGet (field, t) -> Seq ([L "env."; L (string_of_int field); L ": "] @ [write_notwasm_type t])
+    and notwasm_float number =
+      let res = string_of_float number in
+      let res = if res.[(String.length res) - 1] = '.' then res ^ "0" else res in
+      res ^ "f"
     and write_atoms atoms =
       List.map write_atom atoms |> ListExt.concat_with (L ", ")
     and write_names names =
@@ -2799,7 +2856,7 @@ module NotWasm = struct
 
   let compile_ir_to_notwasm result wat_output =
     let writer = Grammar.new_notwasm_writer result wat_output in
-    Ir.string_of_program result.Backend.program |> Debug.print;
+    (* Ir.string_of_program result.Backend.program |> Debug.print; *)
     Collect.collect_program writer;
     Convert.conv_program writer;
     Write.write_program writer;
@@ -2824,7 +2881,10 @@ module Wasm_performance = struct
     let performance_func = {efgh|
 alien javascript "/impl.js" printInteger: (Int) ~> ();
 alien javascript "/impl.js" printFloat: (Float) ~> ();
-alien javascript "/impl.js" changeInnerHtml: (String, String) ~> ();
+alien javascript "/impl.js" changeInnerHtml_hidden: (String, String) ~> ();
+fun changeInnerHtml(a, b) {
+  changeInnerHtml_hidden(a, b)
+}
 fun measure() client {
     var timeBeforeRun = clientTimeMilliseconds();
     var mainResult = main();
@@ -2863,9 +2923,11 @@ end
 
 open Wasm
 open Wasm_performance
-let run (result: Backend.result) output_wat =
-  (* let output_stream2 = open_out ((SysExt.get_filename_without_extension output_wat) ^ ".wat") in
-  let writer2 = Wasm.Pretty_printing.new_wasm_writer output_wat false (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$$default_module") in *)
-  if Settings.get (Wasm_performance.measure_wasm_performance) then trans ((SysExt.get_filename_without_extension output_wat) ^ ".links") else ();
-  (* Ir2WasmAst.compile_links_ir_to_wasm writer2 result; *)
-  NotWasm.compile_ir_to_notwasm result output_wat
+let run (result: Backend.result) backend output_wat =
+  if backend = "wasm" then
+    let output_stream2 = open_out ((SysExt.get_filename_without_extension output_wat) ^ ".wat") in
+    let writer2 = Wasm.Pretty_printing.new_wasm_writer output_wat false (Wasm.Pretty_printing.default_printer ()) output_stream2 (Ir2WasmAst.new_module "$$default_module") in
+    Ir2WasmAst.compile_links_ir_to_wasm writer2 result;
+    if Settings.get (Wasm_performance.measure_wasm_performance) then trans ((SysExt.get_filename_without_extension output_wat) ^ ".links") else ()
+  else if backend = "notwasm" then NotWasm.compile_ir_to_notwasm result output_wat
+  else failwith (Printf.sprintf "Unrecognised client backend %s" backend)

@@ -1,4 +1,4 @@
-val run : Backend.result -> string -> unit
+val run : Backend.result -> string -> string -> unit
 
 module type WASM_PERFORMANCE = sig
 	(* val javascript_time: int ref *)

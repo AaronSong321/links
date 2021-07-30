@@ -1,0 +1,8 @@
+fun addClosure(x) {
+	var y = x + x;
+	fun addAnInt(t) {
+		t+y
+	}
+	addAnInt
+}
+addClosure(8)

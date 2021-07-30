@@ -198,13 +198,12 @@ module Phases = struct
     let tenv      = Context.typing_environment context in
     let ffi_files = Context.ffi_files context in
     let _ = match Settings.get clientBackend with
-    | Some a ->
-      if a = "js" then ()
-      else if a = "wasm" then Irtowasm.run result (match Settings.get wasmOutput with
+    | Some a -> 
+      if a <> "js" then Irtowasm.run result a (match Settings.get wasmOutput with
         | Some s -> s 
         | None -> "output.wat"
       )
-      else failwith (Printf.sprintf "Unrecognised client backend option %s" a)
+      else ()
     | _ -> () in
     Webserver.init (valenv, nenv, tenv) globals ffi_files;
     Evaluate.run result
