@@ -2,8 +2,8 @@ measurePerformance="--set=measure_performance=true"
 wat2wasm="wat2wasm --enable-tail-call --relocatable --debug-names"
 kill $(ps | grep '.*_build/default/bin/links.exe' | grep -v grep | awk '{print $1}')
 files=( "./tests/wasm/performance-proj/tailcall.links" )
-# files=("./tests/wasm/performance-proj/mandelbrot.links")
-# files=("./tests/wasm/performance-proj/pi.links")
+files=("./tests/wasm/performance-proj/mandelbrot.links")
+files=("./tests/wasm/performance-proj/pi.links")
 if make; then
 	for linksFile in $files; do
 		filenameNoExt=${linksFile:0:${#linksFile}-6}

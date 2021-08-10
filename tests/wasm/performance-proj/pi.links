@@ -20,4 +20,11 @@ sig madhavaPi : (Int) ~> Float
 fun madhavaPi(n) {
   4.0 *. pos(0.0, 0.0, intToFloat(n))
 }
-madhavaPi(1)
+fun sample(n) {
+	if (n == 0) ()
+	else {
+		var _ = madhavaPi(n);
+		sample(n-1)
+	}
+}
+sample(100)

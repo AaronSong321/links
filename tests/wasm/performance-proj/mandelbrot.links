@@ -2,15 +2,15 @@ var bailout = 16.0;
 var max_iterations = 200;
 
 fun loop(cr, ci, zr, zi, i) {
-    var i = i + 1;
-    var temp = zr *. zi;
-    var zr2 = zr *. zr;
-    var zi2 = zi *. zi;
-    var zr = zr2 -. zi2 +. cr;
-    var zi = temp +. temp +. ci;
-    if (zi2 +. zr2 > bailout)  i
-    else if (i > max_iterations) 0
-    else loop(cr, ci, zr, zi, i)
+  var i = i + 1;
+  var temp = zr *. zi;
+  var zr2 = zr *. zr;
+  var zi2 = zi *. zi;
+  var zr = zr2 -. zi2 +. cr;
+  var zi = temp +. temp +. ci;
+  if (zi2 +. zr2 > bailout)  i
+  else if (i > max_iterations) 0
+  else loop(cr, ci, zr, zi, i)
 }
 fun mandelbrot(x, y) {
   var cr = y -. 0.5;
@@ -20,4 +20,14 @@ fun mandelbrot(x, y) {
   var i = 0;
   loop(cr, ci, zr, zi, i)
 }
-mandelbrot(20.0,5.3)
+fun sample(x,y,a,n){
+  if (y >= n) {
+    intToFloat(a) /. intToFloat(n*n)
+  } else if (x >= n) {
+    sample(0,y+1,a,n)
+  } else {
+    var d = intToFloat(n);
+    sample(x+1, y, a+mandelbrot(intToFloat(x)/.d, intToFloat(y)/.d), n)
+  }
+}
+sample(0,0,0,15)
