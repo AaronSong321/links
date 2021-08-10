@@ -1,0 +1,23 @@
+mutual {
+  fun pos(a, i, n) {
+    if (i == n) {a}
+    else {
+      var d = (i *. 2.0) +. 1.0;
+      neg(a +. (1.0 /. d), i +. 1.0, n)
+    }
+  }
+
+  fun neg(a, i, n) {
+    if (i == n) {a}
+    else {
+      var d = (i *. 2.0) +. 1.0;
+      pos(a -. (1.0 /. d), i +. 1.0, n)
+    }
+  }
+}
+
+sig madhavaPi : (Int) ~> Float
+fun madhavaPi(n) {
+  4.0 *. pos(0.0, 0.0, intToFloat(n))
+}
+madhavaPi(1)

@@ -5,7 +5,6 @@ fun addRecord(b) {
 fun addVariant(c) {
 	switch (c) {
 		case A(a,b,m) -> 10
-		#case -A as x -> 1
 		case B() -> 8
 	}
 }

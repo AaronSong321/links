@@ -3,6 +3,7 @@ fun addClosure(x) {
 	fun addAnInt(t) {
 		t+y
 	}
+	var b = addAnInt;
 	addAnInt
 }
 addClosure(8)

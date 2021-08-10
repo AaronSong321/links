@@ -206,6 +206,32 @@ module Phases = struct
       else ()
     | _ -> () in
     Webserver.init (valenv, nenv, tenv) globals ffi_files;
+    let mean l =
+      let rec alt l acc =
+        match l with
+        | [] -> acc
+        | h::t -> alt t (acc+.h)
+      in
+      (alt l 0.) /. (float_of_int (List.length l))
+    in
+    let standardDeviation l =
+      let mean = mean l in
+      let rec alt l acc =
+        match l with
+        | [] -> acc
+        | h::t -> alt t (acc+.(h-.mean)*.(h-.mean))
+      in
+      (Float.pow (alt l 0.) 0.5) /. (float_of_int (List.length l))
+    in
+    if Settings.get Irtowasm.measure_wasm_performance then 
+      let m = List.init 20 (fun _ -> 
+        let before = 1000.0 *. Unix.gettimeofday () in
+        let _ = Evaluate.run result in
+        let after = 1000.0 *. Unix.gettimeofday () in
+        after-.before
+      ) in
+      Printf.printf "server-ocaml: mean=%.19f,standard deviation=%.19f\n" (mean m) (standardDeviation m)
+    else ();
     Evaluate.run result
 
   let evaluate_string : Context.t -> string -> (Context.t * Types.datatype * Value.t)
