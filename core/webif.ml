@@ -36,9 +36,18 @@ struct
 
     let fvs = U.Value.load (Yojson.Basic.from_string (Utility.base64decode (assoc "__env" cgi_args))) in
 
+    (* There is an artificial distinction between primitive
+       functions (builtin functions) and function pointers (functions
+       defined as part of a Links program). This is the point where we
+       have to do something about it in order for attempts to remotely
+       call primitive functions to work properly. *)
+
     let func =
       match fvs with
-      | `Record [] -> `FunctionPtr (int_of_string fname, None)
+      | `Record [] -> let i_fname = int_of_string fname in
+          if Lib.is_primitive_var i_fname
+          then `PrimitiveFunction (Lib.primitive_name i_fname, Some i_fname)
+          else `FunctionPtr (int_of_string fname, None)
       | _          -> `FunctionPtr (int_of_string fname, Some fvs) in
     RemoteCall(func, valenv, args)
 
@@ -157,35 +166,36 @@ struct
      * a ServerCont or EvalMain, that is fine -- but we need to construct a b64-encoded
      * JSON object if we're responding to a ClientReturn or RemoteCall. *)
 
-    let handle_ajax_error = function
-      | Aborted r -> Lwt.return r
-      | e ->
-          let json =
-            `Assoc [("error", `String (Errors.format_exception e))] in
-         Lwt.return
-           ("text/plain", Utility.base64encode (Yojson.Basic.to_string json)) in
+    let handle_ajax_error e =
+      let json =
+        `Assoc [("error", `String (Errors.format_exception e))] in
+      Lwt.return
+        ("text/plain", Utility.base64encode (Yojson.Basic.to_string json)) in
 
     let handle_html_error e =
       let mime_type = "text/html; charset=utf-8" in
       match e with
-       | Aborted r -> Lwt.return r
        | Failure msg as e ->
-          prerr_endline msg;
+          Debug.print (Printf.sprintf "Failure(%s)" msg);
           Lwt.return (mime_type, error_page (Errors.format_exception_html e))
        | exc ->
-           Lwt.return (mime_type, error_page (Errors.format_exception_html exc)) in
+          Lwt.return (mime_type, error_page (Errors.format_exception_html exc)) in
 
-    let handle_error e =
-      let req_data = Value.Env.request_data valenv in
-      RequestData.set_http_response_code req_data 500;
-      if (RequestData.is_ajax_call cgi_args) then
-        handle_ajax_error e
-      else
-        handle_html_error e in
+    let handle_exception = function
+      | Aborted r -> Lwt.return r (* Aborts are not "real" errors, as
+                                     every client call throws a
+                                     Proc.Aborted. *)
+      | e ->
+         let req_data = Value.Env.request_data valenv in
+         RequestData.set_http_response_code req_data 500;
+         if (RequestData.is_ajax_call cgi_args) then
+           handle_ajax_error e
+         else
+           handle_html_error e in
 
     Lwt.catch
       (fun () -> perform_request valenv run render_cont render_servercont_cont request )
-      (handle_error) >>=
-    fun (content_type, content) ->
+      handle_exception >>=
+      fun (content_type, content) ->
       response_printer [("Content-type", content_type)] content
 end
